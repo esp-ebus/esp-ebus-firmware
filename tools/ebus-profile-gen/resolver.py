@@ -28,7 +28,8 @@ class IncludeResolver:
         seen: Set[str] = set()
         order: List[str] = []
         self._walk(entry, seen, order)
-        return order
+        # Reverse to get post-order traversal: templates before files that use them
+        return list(reversed(order))
 
     def _abs(self, p: str) -> str:
         if os.path.isabs(p):

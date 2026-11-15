@@ -1408,7 +1408,7 @@ def build_profiles_and_commands(
         # Build FieldIR list from raw fields
         field_irs: List[FieldIR] = []
 
-        if template_name and template_type:
+        if template_name and template_type and not reg_fields:
             # Composite template argument (e.g. Timer<timer>): expand into
             # positioned leaf sub-fields. Mapped arguments (e.g. phase) are
             # excluded by the TYPE_MAP gate; the service companion of

@@ -1436,7 +1436,13 @@ class TspParser:
         ir: Dict[str, Any],
         aliases: Dict[str, str],
     ) -> List[Dict[str, Any]]:
-        """Build field list for a template model."""
+        """Build field list for a template model.
+        
+        For known templates (in _SINGLE_FIELD_TEMPLATES, _TWO_FIELD_TEMPLATES),
+        uses hardcoded field definitions for backward compatibility.
+        For other templates, looks up the template definition in ir['registers']
+        and copies all fields with parameter substitution.
+        """
         fields: List[Dict[str, Any]] = []
 
         if template_name in _SINGLE_FIELD_TEMPLATES:
@@ -1499,26 +1505,77 @@ class TspParser:
                 }
             )
         else:
-            # Unknown template: assume single value field
-            fields.append(
-                {
-                    "name": "value",
-                    "ebus_type": type_param,
-                    "unit": "",
-                    "factor": "",
-                    "offset": "",
-                    "length": 0,
-                    "signed": False,
-                    "big_endian": False,
-                    "bitfield": False,
-                    "bitpos": -1,
-                    "bitlen": 0,
-                    "mask": "",
-                    "our_datatype": self._map_type(type_param),
-                    "meta": {},
-                    "file": "template",
-                }
-            )
+            # Try to find template definition in registers
+            template_def = None
+            for reg in ir.get("registers", []):
+                if reg.get("name") == template_name and reg.get("template_type"):
+                    template_def = reg
+                    break
+            
+            if template_def:
+                # Generic template expansion: copy all fields from template
+                # and substitute template parameters with actual values from instantiation
+                
+                # Get template's full parameter list
+                template_params = template_def.get("template_params", [])
+                # Get instantiation's parameter list
+                inst_params = _parse_template_params(type_param)
+                
+                # Build a complete parameter mapping: template param name -> actual value
+                # Fill in missing parameters with their defaults
+                param_values = {}
+                for i, inst_param in enumerate(inst_params):
+                    if i < len(template_params):
+                        param_values[template_params[i].get("name")] = inst_param.get("name")
+                # Fill in defaults for missing parameters
+                for tpl_param in template_params:
+                    if tpl_param.get("name") not in param_values:
+                        param_values[tpl_param.get("name")] = tpl_param.get("default", "")
+                
+                # Copy all fields from template with substitutions
+                for field in template_def.get("fields", []):
+                    new_field = dict(field)
+                    
+                    # Substitute template parameter in ebus_type
+                    field_type = new_field.get("ebus_type", "")
+                    if field_type in param_values:
+                        new_field["ebus_type"] = param_values[field_type]
+                        new_field["our_datatype"] = self._map_type(new_field["ebus_type"])
+                    
+                    # Substitute const_value references in meta
+                    meta = new_field.get("meta", {})
+                    if "const_value" in meta:
+                        const_val = meta["const_value"]
+                        if const_val in param_values:
+                            meta["const_value"] = param_values[const_val]
+                    
+                    # Remove file/source info from template definition
+                    new_field.pop("file", None)
+                    new_field.pop("line", None)
+                    new_field["file"] = "template"
+                    
+                    fields.append(new_field)
+            else:
+                # Unknown template: assume single value field
+                fields.append(
+                    {
+                        "name": "value",
+                        "ebus_type": type_param,
+                        "unit": "",
+                        "factor": "",
+                        "offset": "",
+                        "length": 0,
+                        "signed": False,
+                        "big_endian": False,
+                        "bitfield": False,
+                        "bitpos": -1,
+                        "bitlen": 0,
+                        "mask": "",
+                        "our_datatype": self._map_type(type_param),
+                        "meta": {},
+                        "file": "template",
+                    }
+                )
 
         return fields
 
