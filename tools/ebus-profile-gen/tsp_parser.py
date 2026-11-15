@@ -794,10 +794,14 @@ class TspParser:
             # Plain (decorator-less) model: a composite type definition,
             # never a command (no @zz/@base). Recorded as raw {name, type}
             # field pairs for mapper-side composite field expansion.
+            # Use namespace-qualified keys to avoid collisions across files.
             mm = _MODEL_RE.match(line)
             if mm:
-                ir["models"][mm.group(1)] = {
-                    "name": mm.group(1),
+                model_name = mm.group(1)
+                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                ir["models"][qualified_name] = {
+                    "name": model_name,
+                    "qualified_name": qualified_name,
                     "fields": self._split_model_fields(mm.group(2)),
                     "file": fpath,
                     "line": lineno,
@@ -808,8 +812,11 @@ class TspParser:
 
             mg = _MODEL_GENERIC_RE.match(line)
             if mg:
-                ir["models"][mg.group(1)] = {
-                    "name": mg.group(1),
+                model_name = mg.group(1)
+                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                ir["models"][qualified_name] = {
+                    "name": model_name,
+                    "qualified_name": qualified_name,
                     "type_param": mg.group(2),
                     "fields": self._split_model_fields(mg.group(3)),
                     "file": fpath,
@@ -821,9 +828,12 @@ class TspParser:
 
             mo = _MODEL_OPEN_RE.match(line)
             if mo:
+                model_name = mo.group(1)
+                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
                 fields, next_i = self._parse_plain_model_body(lines, i + 1)
-                ir["models"][mo.group(1)] = {
-                    "name": mo.group(1),
+                ir["models"][qualified_name] = {
+                    "name": model_name,
+                    "qualified_name": qualified_name,
                     "fields": fields,
                     "file": fpath,
                     "line": lineno,
@@ -834,9 +844,12 @@ class TspParser:
 
             mgo = _MODEL_GENERIC_OPEN_RE.match(line)
             if mgo:
+                model_name = mgo.group(1)
+                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
                 fields, next_i = self._parse_plain_model_body(lines, i + 1)
-                ir["models"][mgo.group(1)] = {
-                    "name": mgo.group(1),
+                ir["models"][qualified_name] = {
+                    "name": model_name,
+                    "qualified_name": qualified_name,
                     "type_param": mgo.group(2),
                     "fields": fields,
                     "file": fpath,
@@ -848,8 +861,11 @@ class TspParser:
 
             mt = _MODEL_TEMPLATE_RE.match(line)
             if mt:
-                ir["models"][mt.group(1)] = {
-                    "name": mt.group(1),
+                model_name = mt.group(1)
+                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                ir["models"][qualified_name] = {
+                    "name": model_name,
+                    "qualified_name": qualified_name,
                     "fields": [],
                     "is": mt.group(2),
                     "arg": mt.group(3),

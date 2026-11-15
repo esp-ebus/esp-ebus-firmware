@@ -1272,8 +1272,42 @@ def build_profiles_and_commands(
             )
         return t, meta
 
+    def _lookup_model(type_name: str, namespace: Optional[str] = None) -> Dict[str, Any]:
+        """Look up a model by name, preferring namespace-qualified keys.
+        
+        With the fix for namespace collisions, models are stored with qualified
+        keys like "Ochsner.command" or "Tem.command". This helper tries to find
+        the most appropriate model by:
+        1. If namespace is provided, try "{namespace}.{type_name}" first
+        2. Try namespace prefixes (e.g., if namespace is "Ochsner._22102", also try "Ochsner")
+        3. Fall back to unqualified type_name (for backward compatibility)
+        4. Return empty dict if not found
+        """
+        if namespace:
+            # Try the full qualified name first
+            qualified_key = f"{namespace}.{type_name}"
+            if qualified_key in models:
+                return models[qualified_key]
+            
+            # Try namespace prefixes (e.g., "Ochsner._22102" -> try "Ochsner")
+            # This handles the case where a model is defined in a parent namespace
+            # but referenced from a child namespace
+            parts = namespace.split(".")
+            for i in range(len(parts) - 1, 0, -1):
+                parent_ns = ".".join(parts[:i])
+                qualified_key = f"{parent_ns}.{type_name}"
+                if qualified_key in models:
+                    return models[qualified_key]
+        
+        # Fall back to unqualified name (for models without namespace or
+        # backward compatibility)
+        if type_name in models:
+            return models[type_name]
+        return {}
+
     def expand_composite_field(
-        parent_name: str, type_name: str, path: List[str], depth: int
+        parent_name: str, type_name: str, path: List[str], depth: int,
+        namespace: Optional[str] = None
     ) -> List[FieldIR]:
         """Expand a composite (plain-model) field into leaf FieldIRs.
 
@@ -1293,14 +1327,16 @@ def build_profiles_and_commands(
             )
             return []
         leaves: List[FieldIR] = []
-        model = models.get(type_name) or {}
+        model = _lookup_model(type_name, namespace)
+        model_namespace = model.get("namespace", namespace)
         for child in model.get("fields", []):
             child_name = str(child.get("name", ""))
             child_type = _strip_qualified(str(child.get("type", "")))
-            if child_type in models and child_type not in TYPE_MAP:
+            if _lookup_model(child_type, model_namespace) and child_type not in TYPE_MAP:
                 leaves.extend(
                     expand_composite_field(
-                        parent_name, child_type, path + [child_name], depth + 1
+                        parent_name, child_type, path + [child_name], depth + 1,
+                        model_namespace
                     )
                 )
                 continue
@@ -1363,7 +1399,7 @@ def build_profiles_and_commands(
         reg_fields = reg.get("fields", [])
         template_name = reg.get("template")
         template_type = reg.get("template_type")
-        namespace = meta.get("namespace", "")
+        namespace = reg.get("namespace", "")
 
         # Store namespace in meta for later use
         if namespace:
@@ -1379,8 +1415,8 @@ def build_profiles_and_commands(
             # two-field templates is preserved.
             tt = _strip_qualified(template_type)
             composite_leaves: List[FieldIR] = []
-            if tt in models and tt not in TYPE_MAP:
-                composite_leaves = expand_composite_field("value", tt, [], 0)
+            if _lookup_model(tt, namespace) and tt not in TYPE_MAP:
+                composite_leaves = expand_composite_field("value", tt, [], 0, namespace)
             if composite_leaves:
                 log.debug(
                     "template",
@@ -1525,8 +1561,8 @@ def build_profiles_and_commands(
                 # its own (mapped types like phase are never expanded) →
                 # emit positioned leaf sub-fields instead of the raw type.
                 leaf_type = _strip_qualified(f_ebus_type)
-                if leaf_type in models and leaf_type not in TYPE_MAP:
-                    leaves = expand_composite_field(f_name, leaf_type, [], 0)
+                if _lookup_model(leaf_type, namespace) and leaf_type not in TYPE_MAP:
+                    leaves = expand_composite_field(f_name, leaf_type, [], 0, namespace)
                     if leaves:
                         log.debug(
                             "template",
