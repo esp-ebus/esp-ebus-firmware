@@ -683,6 +683,7 @@ void Mqtt::handleWrite(std::string_view payload) {
 
   std::string_view key_view;
   std::string_view val_view;
+  bool has_value = false;
 
   reader.forEachField([&](std::string_view k, ebus::detail::JsonReader& r) {
     if (k == "key") {
@@ -690,6 +691,7 @@ void Mqtt::handleWrite(std::string_view payload) {
         key_view = r.value();
       }
     } else if (k == "value") {
+      has_value = true;
       val_view = r.rawValue();
     }
     return true;
@@ -699,7 +701,9 @@ void Mqtt::handleWrite(std::string_view payload) {
 
   Command* command = command_manager.findCommand(key_view);
   if (command != nullptr) {
-    if (val_view.empty()) {
+    const bool fieldless_write =
+        !has_value && command->canWriteWithoutValue();
+    if (!has_value && !fieldless_write) {
       publishStream("response", 0, false,
                     [key_view](const ebus::JsonChunkVisitor& v) {
                       ebus::detail::JsonWriter writer(v);
@@ -714,9 +718,10 @@ void Mqtt::handleWrite(std::string_view payload) {
       return;
     }
 
-    ebus::Sequence value_bytes = command->getVectorFromValue(val_view);
+    ebus::Sequence value_bytes;
+    if (has_value) value_bytes = command->getVectorFromValue(val_view);
 
-    if (!value_bytes.empty()) {
+    if (fieldless_write || !value_bytes.empty()) {
       ebus::Sequence full_write =
           command->buildWriteSequence(command_manager, value_bytes);
 
@@ -774,9 +779,14 @@ void Mqtt::handleDirectWrite(std::string_view key, std::string_view val_view) {
   // Scalar for single-field commands, {"field":value,...} object for
   // multi-field ones - getVectorFromValue routes and rejects incomplete
   // payloads before anything reaches the bus.
-  ebus::Sequence value_bytes = command->getVectorFromValue(val_view);
+  const bool fieldless_write =
+      val_view.empty() && command->canWriteWithoutValue();
+  ebus::Sequence value_bytes;
+  if (!fieldless_write) {
+    value_bytes = command->getVectorFromValue(val_view);
+  }
 
-  if (!value_bytes.empty()) {
+  if (fieldless_write || !value_bytes.empty()) {
     ebus::Sequence full_write =
         command->buildWriteSequence(command_manager, value_bytes);
     if (full_write.empty()) {

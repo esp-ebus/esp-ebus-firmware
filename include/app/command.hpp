@@ -87,10 +87,11 @@ class Command {
   ebus::Sequence buildWriteCmd(ebus::ByteView value) const;
 
   bool hasWriteCmd() const;
+  bool canWriteWithoutValue() const;
 
   // Builds the full write frame for the command's write_type: buildWriteCmd
   // for simple, the weishaupt 5023 encoding for weishaupt. Empty for
-  // read-only commands, empty values and rejected encodings.
+  // read-only commands, unsupported empty values and rejected encodings.
   ebus::Sequence buildWriteSequence(const class CommandManager& manager,
                                     ebus::ByteView value) const;
 

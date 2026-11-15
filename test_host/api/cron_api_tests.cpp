@@ -22,6 +22,16 @@ void insertWritableCommand() {
   REQUIRE(command_manager.findCommand("cron-test") != nullptr);
 }
 
+void insertFieldlessCommand() {
+  command_manager.wipeCommands();
+  const std::string command_json =
+      R"({"key":"stop","name":"Ioteststop","zz":"08","wpbsb":"b506","wdx":"01",)"
+      R"("interval":0,"master":false,"fields":[]})";
+  ebus::detail::JsonReader command_reader(command_json);
+  command_manager.insertCommand(Command::fromJson(command_reader));
+  REQUIRE(command_manager.findCommand("stop") != nullptr);
+}
+
 }  // namespace
 
 TEST_CASE("CronApi serves the cron page", "[cron_api]") {
@@ -77,6 +87,30 @@ TEST_CASE("CronApi evaluates valid rules and rejects invalid schedules",
   REQUIRE(invalid_req.status == "400 Bad Request");
   REQUIRE(invalid_req.final_body.find("Invalid minute field") !=
           std::string::npos);
+  command_manager.wipeCommands();
+}
+
+TEST_CASE("CronApi saves fieldless rules without a value", "[cron_api]") {
+  insertFieldlessCommand();
+  Cron cron_api_commands(command_manager);
+  CronApi api(cron_api_commands);
+
+  httpd_req_t save_req{};
+  save_req.body =
+      R"([{"id":"stop-rule","schedule":"* * * * *","command_key":"stop",)"
+      R"("enabled":true}])";
+  save_req.content_len = static_cast<int>(save_req.body.size());
+
+  REQUIRE(CronApi::handleCronSave(&save_req) == ESP_OK);
+  REQUIRE(save_req.status == "200 OK");
+
+  httpd_req_t list_req{};
+  REQUIRE(CronApi::handleCron(&list_req) == ESP_OK);
+  std::string body;
+  for (const auto& chunk : list_req.chunks) body += chunk;
+  REQUIRE(body.find(R"("command_key":"stop")") != std::string::npos);
+  REQUIRE(body.find(R"("value")") == std::string::npos);
+
   command_manager.wipeCommands();
 }
 

@@ -39,6 +39,15 @@ void registerWriteCommand() {
   command_manager.insertCommand(Command::fromJson(reader));
 }
 
+void registerFieldlessWriteCommand() {
+  command_manager.wipeCommands();
+  std::string json =
+      R"({"key":"stop","name":"Ioteststop","zz":"08","wpbsb":"b506","wdx":"01",)"
+      R"("interval":0,"master":false,"fields":[]})";
+  ebus::detail::JsonReader reader(json);
+  command_manager.insertCommand(Command::fromJson(reader));
+}
+
 }  // namespace
 
 TEST_CASE("Cron matchField handles wildcards, values and lists", "[cron]") {
@@ -119,8 +128,25 @@ TEST_CASE("Cron validateRule accepts a complete rule", "[cron]") {
                                           command_manager) == "");
 }
 
+TEST_CASE("Cron accepts fieldless write rules without a value", "[cron]") {
+  registerFieldlessWriteCommand();
+  Cron::Rule rule = makeRule("* * * * *", "stop");
+  rule.value_json.clear();
+
+  REQUIRE(app::detail::cron::validateRule(rule, command_manager).empty());
+
+  rule.value_json = "1";
+  REQUIRE(app::detail::cron::validateRule(rule, command_manager) ==
+          "Invalid value for command 'stop'");
+}
+
 TEST_CASE("Cron validateRule reports missing parts", "[cron]") {
   registerWriteCommand();
+  Cron::Rule missing_value = makeRule("* * * * *", "c1");
+  missing_value.value_json.clear();
+  REQUIRE(app::detail::cron::validateRule(missing_value, command_manager) ==
+          "Missing field 'value'");
+
   Cron::Rule missing_id = makeRule("* * * * *", "c1");
   missing_id.id.clear();
   REQUIRE(

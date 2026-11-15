@@ -85,6 +85,47 @@ TEST_CASE("ValuesApi reads and writes by key", "[values_api]") {
   command_manager.wipeCommands();
 }
 
+TEST_CASE("ValuesApi writes a fieldless command with key only",
+          "[values_api]") {
+  command_manager.wipeCommands();
+  const std::string command_json =
+      R"({"key":"stop","name":"Ioteststop","zz":"08","wpbsb":"b506","wdx":"01",)"
+      R"("interval":0,"master":false,"fields":[]})";
+  ebus::detail::JsonReader reader(command_json);
+  command_manager.insertCommand(Command::fromJson(reader));
+  ValuesApi api(command_manager);
+
+  httpd_req_t write_req{};
+  write_req.body = R"({"key":"stop"})";
+  write_req.content_len = static_cast<int>(write_req.body.size());
+  REQUIRE(ValuesApi::handleValuesWrite(&write_req) == ESP_OK);
+  REQUIRE(write_req.status == "200 OK");
+  REQUIRE(write_req.final_body.find(R"("status":"successful")") !=
+          std::string::npos);
+
+  httpd_req_t valued_req{};
+  valued_req.body = R"({"key":"stop","value":1})";
+  valued_req.content_len = static_cast<int>(valued_req.body.size());
+  REQUIRE(ValuesApi::handleValuesWrite(&valued_req) == ESP_OK);
+  REQUIRE(valued_req.status == "400 Bad Request");
+
+  command_manager.wipeCommands();
+}
+
+TEST_CASE("ValuesApi still requires values for fieldful commands",
+          "[values_api]") {
+  insertTestCommand();
+  ValuesApi api(command_manager);
+
+  httpd_req_t write_req{};
+  write_req.body = R"({"key":"01"})";
+  write_req.content_len = static_cast<int>(write_req.body.size());
+  REQUIRE(ValuesApi::handleValuesWrite(&write_req) == ESP_OK);
+  REQUIRE(write_req.status == "400 Bad Request");
+
+  command_manager.wipeCommands();
+}
+
 TEST_CASE("ValuesApi rejects unknown keys", "[values_api]") {
   command_manager.wipeCommands();
   ValuesApi api(command_manager);

@@ -96,6 +96,8 @@ alone. Errors: `400` malformed body, `404` unknown key.
 ### `POST /api/v1/app/values/write`
 
 Body: `{"key":"42","value":…}` with `value` per the write contract.
+For a fieldless simple write command, omit `value` and send only
+`{"key":"<key>"}`.
 
 ```bash
 # single-field
@@ -139,11 +141,12 @@ MAC), configurable (`rootTopic`); a custom root gets a trailing `/`.
   re-publishes the value; unknown key answers on `response`.
 - `write` accepts `value` in **either write-contract form** (scalar or
   object) and answers on `response` — JSON objects are accepted here
-  regardless of the configured payload mode.
+  regardless of the configured payload mode. For a fieldless simple
+  write command, omit `value`.
 - `set/<key>` is the direct-write form (also what Home Assistant uses):
   payload is a scalar for single-field commands or a JSON object for
-  multi-field ones. Failures are logged, not answered (no correlation id
-  on this path).
+  multi-field ones. An empty payload triggers a fieldless simple write.
+  Failures are logged, not answered (no correlation id on this path).
 - `request`/`set` answers and values are only queued while connected;
   they refresh on the next poll cycle, keeping `publish_failed` clean
   across reconnects.
@@ -171,7 +174,7 @@ polling, which only reads).
   `schedule` is a standard 5-field cron expression evaluated in
   **local time** (SNTP + timezone must be correct).
 - `value` is stored as raw JSON and may be **scalar or object** — the
-  same write contract applies.
+  same write contract applies. Omit it for fieldless simple write commands.
 - Validated at save (unknown command, read-only command, bad value →
   rejected) and again at fire time (rule skipped with a warning if the
   command disappeared or the value went out of range).

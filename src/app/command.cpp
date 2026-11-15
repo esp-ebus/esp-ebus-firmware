@@ -121,7 +121,7 @@ const char* Command::getWriteTypeName() const {
 
 ebus::Sequence Command::buildWriteSequence(const CommandManager&,
                                            ebus::ByteView value) const {
-  if (value.empty() || wid_len_ < 2) return {};
+  if (wid_len_ < 2 || (value.empty() && !canWriteWithoutValue())) return {};
 
   if (write_type_ == command_types::WriteType::simple) {
     return buildWriteCmd(value);
@@ -207,6 +207,11 @@ ebus::ByteView Command::getNn() const {
 }
 
 bool Command::hasWriteCmd() const { return wid_len_ != 0; }
+
+bool Command::canWriteWithoutValue() const {
+  return fields_.empty() && hasWriteCmd() &&
+         write_type_ == command_types::WriteType::simple;
+}
 
 size_t Command::buildReadCmd(uint8_t* out, size_t cap) const {
   if (id_len_ < 2) return 0;

@@ -756,12 +756,32 @@ TEST_CASE("Command buildWriteCmd derives NN from value", "[Command]") {
   Command cmd = Command::fromJson(reader);
 
   REQUIRE(cmd.hasWriteCmd() == true);
+  REQUIRE_FALSE(cmd.canWriteWithoutValue());
+  REQUIRE(cmd.buildWriteSequence(command_manager, {}).empty());
 
   uint8_t vb[] = {0xaa};
   ebus::Sequence seq = cmd.buildWriteCmd(ebus::ByteView(vb, 1));
   REQUIRE(seq.size() == 8);
   const uint8_t expect[] = {0x50, 0xb5, 0x09, 0x04, 0x0e, 0x33, 0x00, 0xaa};
   for (size_t i = 0; i < sizeof(expect); i++) REQUIRE(seq[i] == expect[i]);
+}
+
+TEST_CASE("Command builds fieldless write without a value", "[Command]") {
+  std::string json =
+      R"({"key":"stop","name":"Ioteststop","zz":"08","wpbsb":"b506","wdx":"01",)"
+      R"("interval":0,"master":false,"fields":[]})";
+  JsonReader reader(json);
+  Command cmd = Command::fromJson(reader);
+
+  REQUIRE(cmd.getFieldCount() == 0);
+  REQUIRE(cmd.canWriteWithoutValue());
+
+  ebus::Sequence seq = cmd.buildWriteCmd({});
+  const uint8_t expect[] = {0x08, 0xb5, 0x06, 0x01, 0x01};
+  REQUIRE(seq.size() == sizeof(expect));
+  for (size_t i = 0; i < sizeof(expect); i++) REQUIRE(seq[i] == expect[i]);
+  REQUIRE(cmd.buildWriteSequence(command_manager, {}).size() ==
+          sizeof(expect));
 }
 
 TEST_CASE("Command buildWriteCmd is empty for read-only command", "[Command]") {
