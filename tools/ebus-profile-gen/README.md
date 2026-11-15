@@ -74,7 +74,20 @@ By default the CLI writes raw generated output to `tools/ebus-profile-gen/genera
   `{key, name, zz, pbsb, [dx], [nn], wpbsb, [wdx], interval, master, fields: [{name, profile, position, ha_profile, [bits]}]}`.
   `wpbsb`/`wdx` are omitted for read-only commands, `interval` defaults to 0 (passive only), `master` defaults to false, `ha_profile` is empty — fill these in by hand (exception: fields carrying a `bits` map get `ha_profile: "binary_sensor"` automatically — one HA binary_sensor per bit).
   `bits` appears on byte-grouped bitfield fields (consecutive `BI0`–`BI7` children collapsed into one `UINT8` byte) as a map of sub-field name to bit index within that byte.
-  `zz` is the destination byte. An explicit `@zz` on the command or an inherited model takes precedence; otherwise it comes from `--zz`, a leading two-digit hex address in the tsp filename (e.g. `52.` → `52`), a numeric commented `// @zz(0x...)` in the entry file, or the fallback `08`. The read id splits into `pbsb` (`PB SB`, always present, `""` for write-only) and `dx` (the `Dx...` tail, 0–4 bytes), the write id into `wpbsb`/`wdx` with the same layout (concatenated ids are 2–6 bytes). The tail is the resolved `@base`/`@inherit` D bytes plus the model's own `@ext` bytes (no default `0x0d` is invented); read NN is derived as `len(dx)` (= `len(id)-2`) unless an explicit `nn` override is given (the runtime write NN also counts the appended value bytes). Write-only commands carry an empty `pbsb` (`""`) and the addressing in `wpbsb`/`wdx` alone.
+  `zz` is the destination byte. An explicit `@zz` on the command or an
+  inherited model takes precedence; otherwise it comes from `--zz`, a leading
+  two-digit hex address in the tsp filename (e.g. `52.` → `52`), a numeric
+  commented `// @zz(0x...)` in the entry file, or the fallback `08`. Upstream
+  ebusd configuration uses the filename address as the default and its CSV
+  emitter leaves that address out of each row; the generator mirrors this
+  defaulting behavior. The read id splits into `pbsb` (`PB SB`, always
+  present, `""` for write-only) and `dx` (the `Dx...` tail, 0–4 bytes), the
+  write id into `wpbsb`/`wdx` with the same layout (concatenated ids are 2–6
+  bytes). The tail is the resolved `@base`/`@inherit` D bytes plus the model's
+  own `@ext` bytes (no default `0x0d` is invented); read NN is derived as
+  `len(dx)` (= `len(id)-2`) unless an explicit `nn` override is given (the
+  runtime write NN also counts the appended value bytes). Write-only commands
+  carry an empty `pbsb` (`""`) and the addressing in `wpbsb`/`wdx` alone.
   `key` is prefixed (default: the full lowercased tsp stem, e.g.
       `08.ehp.tsp` → `08.ehp_`), with a sequential id appended (e.g.
       `08.ehp_001`). The full stem is preserved — `52.mc2.mc.4.tsp` →
@@ -143,7 +156,8 @@ python3 tools/ebus-profile-gen/generate.py \
 
 ### Working
 - TypeSpec file parsing (including models with explicit fields)
-- Template model detection (ReadonlyRegister, ServiceUpdateRegister, etc.)
+- Template handling, including multi-parameter definitions, field expansion,
+  and namespace-aware model lookup
 - Type mapping from TypeSpec types to project datatypes (partial)
 - JSON output generation
 - Decorator capture for all models (including those with bodies)

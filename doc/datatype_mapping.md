@@ -5,7 +5,9 @@ This document describes how eBUS wire types map to the library's native
 `ebus::DataType` values and how the firmware's data profiles add display and
 validation metadata. The profile JSON files are the source of truth for the
 profile inventory; see [`profiles/README.md`](../profiles/README.md) for profile
-authoring and user overlays.
+authoring and user overlays. Type mappings are implemented from the published
+specification; tests use original fixtures rather than copied upstream code or
+test data.
 
 ## ebus library native DataTypes
 
@@ -139,6 +141,15 @@ Representative mappings from ebusd's base `_templates.tsp` and Vaillant
 | BI0-BI7 / boolean | Bit extraction | BI runs collapse into one UINT8 field with a per-bit `bits` map; plain boolean/BOOL commands are gated — no `ebus::DataType` BOOL exists |
 
 ---
+
+### Extending datatype support
+
+When adding a TypeSpec datatype mapping, keep the library and generator in
+sync: implement its enum, decode/encode behavior, and sentinel handling in the
+library with host tests; update the mapping tables here and the relevant
+`TYPE_MAP`, `DATATYPE_SIZE`, and `SUPPORTED_DATATYPES` entries in
+`tools/ebus-profile-gen/mapper.py`; add app data profiles when needed; then
+regenerate representative output and compare conversion-log warnings.
 
 ## App Data Profiles (`profiles/data_profiles.json`)
 
