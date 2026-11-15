@@ -576,11 +576,15 @@ def _classify_type(
 
 
 def _map_profile_name(
-    ebus_type: str, unit: str, max_length: Optional[int] = None
+    ebus_type: str,
+    unit: str,
+    max_length: Optional[int] = None,
+    divider: float = 1.0,
 ) -> str:
     """Map a field's ebus_type and unit to a profile name in data_profiles.json.
 
-    This uses the datatype and unit to determine the appropriate profile name.
+    This uses the datatype, unit, and divider to determine the appropriate
+    profile name.
     """
     # Get the mapped datatype
     datatype = _map_type(ebus_type, max_length)
@@ -589,16 +593,14 @@ def _map_profile_name(
     # Special mappings based on type + unit combinations
     # Temperature
     if "celsius" in unit_lower or unit_lower == "°c" or unit_lower == "c":
-        if datatype == "DATA2C":
-            return "data2c_celsius"
-        if datatype == "DATA2B":
-            return "data2b_celsius"
-        if datatype == "DATA1C":
-            return "data1c_celsius"
-        if datatype == "INT8":
-            return "int8_celsius"
-        if datatype == "UINT8":
-            return "uint8_celsius"
+        if datatype in SUPPORTED_DATATYPES and datatype.startswith(
+            ("DATA", "INT", "UINT", "FLOAT")
+        ):
+            profile_name = f"{datatype.lower()}_celsius"
+            if divider != 1:
+                divider_name = format(divider, "g").replace(".", "p")
+                profile_name += f"_div{divider_name}"
+            return profile_name
 
     # Pressure
     if unit_lower == "bar":
@@ -810,6 +812,7 @@ def _profile_names_for_family(fam: FamilyIR) -> Dict[Tuple[Any, ...], str]:
                 field.ebus_type,
                 signature[1],
                 _max_length_from_meta(field.meta),
+                signature[2],
             )
             original_name = profile_name
             suffix = 1
@@ -1057,12 +1060,15 @@ def commands_to_flat_entries(
         fields: List[Dict[str, Any]] = []
         byte_offset = 0
         for f in c.fields:
-            profile = profile_names.get(
-                _profile_signature(f),
-                _map_profile_name(
-                    f.ebus_type, f.unit or "", _max_length_from_meta(f.meta)
-                ),
-            )
+            signature = _profile_signature(f)
+            profile = profile_names.get(signature)
+            if profile is None:
+                profile = _map_profile_name(
+                    f.ebus_type,
+                    signature[1],
+                    _max_length_from_meta(f.meta),
+                    signature[2],
+                )
 
             # Get min/max overrides from field meta
             min_val = f.meta.get("min") if f.meta.get("min") is not None else None

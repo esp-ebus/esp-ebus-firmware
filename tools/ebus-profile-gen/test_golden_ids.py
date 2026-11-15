@@ -22,10 +22,10 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import mapper  # noqa: E402
-from model import FamilyIR  # noqa: E402
 import resolver  # noqa: E402
 import tsp_parser  # noqa: E402
 from convlog import NULL_LOG  # noqa: E402
+from model import CommandIR, FamilyIR, FieldIR  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -312,6 +312,122 @@ def expect_distinct_profile_refs(
         _failures.append(f"profile variants: {exc}")
 
 
+def expect_unit_profile_mappings() -> None:
+    """Assert unit profiles are selected only when their scaling matches."""
+    global _checks
+    _checks += 1
+    try:
+        family = FamilyIR(
+            commands=[
+                CommandIR(
+                    name="SignedTemperature",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="INT16",
+                            unit="°C",
+                            factor="10",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="UnsignedTemperature",
+                    fields=[
+                        FieldIR(name="value", ebus_type="UINT16", unit="°C")
+                    ],
+                ),
+                CommandIR(
+                    name="UnscaledSignedTemperature",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="INT16",
+                            unit="°C",
+                            factor="1",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="ScaledUnsignedTemperature",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="UINT16",
+                            unit="°C",
+                            factor="10",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="FloatTemperature",
+                    fields=[
+                        FieldIR(name="value", ebus_type="FLOAT32", unit="°C")
+                    ],
+                ),
+                CommandIR(
+                    name="HalfScaledSignedTemperature",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="INT16",
+                            unit="°C",
+                            factor="2",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="ReverseSignedTemperature",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="INT16R",
+                            unit="°C",
+                            factor="10",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="ScaledDataTemperature",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="DATA2C",
+                            unit="°C",
+                            factor="16",
+                        )
+                    ],
+                ),
+            ]
+        )
+        profiles = mapper.profiles_to_flat_entries(family, log=NULL_LOG)
+        commands = mapper.commands_to_flat_entries(family, log=NULL_LOG)
+        profile_by_name = {profile["name"]: profile for profile in profiles}
+        command_by_name = {command["name"]: command for command in commands}
+
+        expected = {
+            "SignedTemperature": ("int16_celsius_div10", 10),
+            "UnsignedTemperature": ("uint16_celsius", 1),
+            "UnscaledSignedTemperature": ("int16_celsius", 1),
+            "ScaledUnsignedTemperature": ("uint16_celsius_div10", 10),
+            "FloatTemperature": ("float32_celsius", 1),
+            "HalfScaledSignedTemperature": ("int16_celsius_div2", 2),
+            "ReverseSignedTemperature": ("int16r_celsius_div10", 10),
+            "ScaledDataTemperature": ("data2c_celsius_div16", 16),
+        }
+        for command_name, (profile_name, divider) in expected.items():
+            field_profile = command_by_name[command_name]["fields"][0]["profile"]
+            assert field_profile == profile_name, (
+                f"{command_name}: expected {profile_name!r}, got {field_profile!r}"
+            )
+            profile = profile_by_name[field_profile]
+            assert profile["divider"] == divider, (
+                f"{command_name}: expected divider {divider}, "
+                f"got {profile['divider']!r}"
+            )
+    except (AssertionError, KeyError) as exc:
+        _failures.append(f"unit profile mapping: {exc}")
+
+
 def main() -> int:
     # hcmode_inc: @inherit chains, BI gate, no fabricated 0x0d.
     hcmode = entries_for("src/vaillant/hcmode_inc.tsp")
@@ -461,6 +577,7 @@ def main() -> int:
     expect_distinct_profile_refs(
         ctlv2_commands, "CylinderChargeHyst", "CylinderChargeOffset"
     )
+    expect_unit_profile_mappings()
 
     ehp_profiles, ehp_commands = profile_outputs_for("src/vaillant/08.ehp.tsp")
     expect_profile_metadata(
