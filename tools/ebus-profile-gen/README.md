@@ -75,8 +75,12 @@ By default the CLI writes raw generated output to `tools/ebus-profile-gen/genera
   `wpbsb`/`wdx` are omitted for read-only commands, `interval` defaults to 0 (passive only), `master` defaults to false, `ha_profile` is empty — fill these in by hand (exception: fields carrying a `bits` map get `ha_profile: "binary_sensor"` automatically — one HA binary_sensor per bit).
   `bits` appears on byte-grouped bitfield fields (consecutive `BI0`–`BI7` children collapsed into one `UINT8` byte) as a map of sub-field name to bit index within that byte.
   `zz` is the destination byte; the read id splits into `pbsb` (`PB SB`, always present, `""` for write-only) and `dx` (the `Dx...` tail, 0–4 bytes), the write id into `wpbsb`/`wdx` with the same layout (concatenated ids are 2–6 bytes). The tail is the resolved `@base`/`@inherit` D bytes plus the model's own `@ext` bytes (no default `0x0d` is invented); read NN is derived as `len(dx)` (= `len(id)-2`) unless an explicit `nn` override is given (the runtime write NN also counts the appended value bytes). Write-only commands carry an empty `pbsb` (`""`) and the addressing in `wpbsb`/`wdx` alone.
-  `key` is prefixed (default: derived from tsp filename, e.g. `08.ehp.tsp` → `ehp_8d`).
-  Use `--key-prefix` to override the default prefix.
+  `key` is prefixed (default: derived from tsp filename, e.g. `08.ehp.tsp`
+      → `ehp_`), with a sequential id appended (e.g. `ehp_001`). The full
+      lowercased tsp stem is preserved as the prefix — `52.mc2.mc.4.tsp` →
+      `52.mc2.mc.4_050` — so keys stay unique per (slave, file, id) even when
+      different units carry registers of the same name (see
+      `config/README.md`). Use `--key-prefix` to override the default prefix.
 
 This directory is **gitignored** — raw output never gets committed by accident.
 
@@ -152,10 +156,15 @@ python3 tools/ebus-profile-gen/generate.py \
    - Expected: Using existing profile names from `profiles/data_profiles.json` like `"data2c_celsius"`, `"uint32_hour"`
    - Fix needed: Map TypeSpec scalar types (cntstarts, tempsensor, presssensor, etc.) to appropriate profile names
 
-3. **Command name formatting**
-   - Currently: snake_case like `"comp_starts_hwc"`
-   - Expected: Hierarchical format like `"Compressor/Starts_HWC"` or `"Buffer/Middle_Temperature"`
-   - Fix needed: Convert names to use slash/underscore hierarchy
+3. **Command name formatting** — Status: FIXED 2026-12-19
+   - Now: Upstream TypeSpec model name verbatim, PascalCase
+     (e.g. `"CompStartsHwc"`, `"Setpoints_Monday"`)
+   - Previously: snake_case (`"comp_starts_hwc"`)
+   - Rationale: matches the ebusd-configuration CSV `name` column exactly, so
+     regenerated output diffs cleanly against upstream. The slash-based
+     hierarchy (`Buffer/Middle_Temperature`) is a hand-written convention in
+     `config/*.json` and is deliberately **not** reproduced by the generator —
+     see `config/README.md`.
 
 4. **Data profile fields**
    - Currently: Basic fields with no min/max values
@@ -167,16 +176,21 @@ python3 tools/ebus-profile-gen/generate.py \
 The critical parser bug (double increment in `_parse_model_inline`) has been fixed. All models, including those with explicit field bodies, now have their decorators properly captured.
 
 Remaining work focuses on the mapper to improve output quality:
-1. Fix command key generation to use `ext_pb` from decorators
-2. Correct the `read_cmd` format to include proper MF, PB, SB values
-3. Improve profile name mapping to use existing profile names
-4. Enhance command name formatting to match the hierarchical convention
-5. Populate data profile metadata (divider, digits, min, max) from TypeSpec definitions
+   1. Fix command key generation to use `ext_pb` from decorators
+   2. Correct the `read_cmd` format to include proper MF, PB, SB values
+   3. Improve profile name mapping to use existing profile names
+   4. Populate data profile metadata (divider, digits, min, max) from TypeSpec
+      definitions
+   *(Command name formatting is settled — see item 3 above; the slash-based
+   hierarchy is a hand-written `config/*.json` convention, not a generator
+   target.)*
 
 Defaults:
 - `--ebusd-root`: `tools/ebus-profile-gen/ebusd-configuration`
 - `--ebus-typespec-root`: `tools/ebus-profile-gen/ebus-typespec`
-- `--key-prefix`: derived from tsp filename (e.g. `08.ehp.tsp` → `ehp_`)
+- `--key-prefix`: derived from the full lowercased tsp stem (e.g.
+  `08.ehp.tsp` → `08.ehp_`, `52.mc2.mc.4.tsp` → `52.mc2.mc.4_`); override
+  with `--key-prefix` to use a different stem or strip the slave address
 - `--out-generated`: `tools/ebus-profile-gen/generated/`
 - `--validate`: true (fail on constraint violations)
 - `--log`: `<out-generated>/<tsp_stem>.conversion.jsonl` (write; gitignored)

@@ -12,6 +12,7 @@
 #include "app/command_manager.hpp"
 #include "app/ebus_accessor.hpp"
 #include "app/mqtt_ha.hpp"
+#include "app/mqtt_topic.hpp"
 #include "ebus/detail/json_reader.hpp"
 #include "ebus/detail/json_writer.hpp"
 #include "ebus/status.hpp"
@@ -813,11 +814,6 @@ void Mqtt::handleValueUpdate(std::string_view key) {
 
   if (!connected_) return;
 
-  auto lowerTopic = [](char* topic, int len) {
-    for (int i = 7; i < len; ++i)
-      topic[i] = (char)tolower((unsigned char)topic[i]);
-  };
-
   const size_t field_count = cmd->getFieldCount();
   // A bits field must not be swallowed by the single-topic shortcut: it
   // expands to one topic per bit (json_single / plain) instead.
@@ -825,10 +821,16 @@ void Mqtt::handleValueUpdate(std::string_view key) {
   if ((field_count <= 1 && !field0_bits) ||
       payload_mode_ == MqttPayloadMode::json_multivalue) {
     char topic_buf[128];
-    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s",
-                     (int)cmd->getName().size(), cmd->getName().data());
+    // Topic is keyed off the command key, not the name: the same model
+    // name (e.g. FlowTemp) resolves to different physical registers in
+    // different units (52.mc2.mc.4 vs 53.mc2.mc.5), so the name alone
+    // would collide. The key is unique per (slave, file, id).
+    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s/%.*s",
+                     (int)key.size(), key.data(), (int)cmd->getName().size(),
+                     cmd->getName().data());
     if (n <= 0 || (size_t)n >= sizeof(topic_buf)) return;
-    lowerTopic(topic_buf, n);
+    n = static_cast<int>(toSnakeCase(topic_buf, n));
+    topic_buf[n] = '\0';
 
     if (payload_mode_ == MqttPayloadMode::plain) {
       publishStream(topic_buf, 0, false, [&](const ebus::JsonChunkVisitor& v) {
@@ -854,10 +856,12 @@ void Mqtt::handleValueUpdate(std::string_view key) {
         const std::string_view bit_name = cmd->getFieldBitName(i, b);
         if (bit_name.empty()) continue;
         char topic_buf[128];
-        int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s",
-                         (int)bit_name.size(), bit_name.data());
+        int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s/%.*s",
+                         (int)key.size(), key.data(), (int)bit_name.size(),
+                         bit_name.data());
         if (n <= 0 || (size_t)n >= sizeof(topic_buf)) continue;
-        lowerTopic(topic_buf, n);
+        n = static_cast<int>(toSnakeCase(topic_buf, n));
+        topic_buf[n] = '\0';
         const uint32_t bit_val = byte_ok ? ((byte >> b) & 1u) : 0;
         if (payload_mode_ == MqttPayloadMode::plain) {
           char plain_buf[8];
@@ -882,9 +886,11 @@ void Mqtt::handleValueUpdate(std::string_view key) {
     if (!field_name || !field_name[0]) field_name = "value";
 
     char topic_buf[128];
-    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%s", field_name);
+    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s/%s",
+                     (int)key.size(), key.data(), field_name);
     if (n <= 0 || (size_t)n >= sizeof(topic_buf)) continue;
-    lowerTopic(topic_buf, n);
+    n = static_cast<int>(toSnakeCase(topic_buf, n));
+    topic_buf[n] = '\0';
 
     if (payload_mode_ == MqttPayloadMode::plain) {
       publishStream(topic_buf, 0, false,

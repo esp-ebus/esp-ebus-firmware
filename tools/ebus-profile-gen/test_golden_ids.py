@@ -14,7 +14,6 @@ repo root:
 from __future__ import annotations
 
 import os
-import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -41,9 +40,12 @@ def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
     files = res.resolve(tsp_rel)
     raw = tsp_parser.TspParser(files).parse()
     fam = mapper.build_profiles_and_commands(raw, log=NULL_LOG)
+    # Key prefix mirrors generate.py: the tsp stem verbatim, lowercased
+    # (52.mc2.mc.4 → "52.mc2.mc.4_"). The leading "NN." is the slave
+    # address and is kept — it is the only thing that disambiguates
+    # same-named registers across units (FlowTemp in 52 vs 53).
     stem = os.path.splitext(os.path.basename(tsp_rel))[0]
-    name = re.sub(r"^\d+\.?", "", stem)
-    prefix = f"{name.lower()}_" if name else ""
+    prefix = f"{stem.lower()}_" if stem else ""
     entries = mapper.commands_to_flat_entries(
         fam, key_prefix=prefix, aliases=raw.get("aliases", {}), log=NULL_LOG
     )
@@ -214,124 +216,124 @@ def expect_bits(
 def main() -> int:
     # hcmode_inc: @inherit chains, BI gate, no fabricated 0x0d.
     hcmode = entries_for("src/vaillant/hcmode_inc.tsp")
-    expect(hcmode, "date_time", "b50400")
-    expect(hcmode, "status16", "b50416")
-    expect(hcmode, "status01", "b51101")
-    expect(hcmode, "status02", "b51102")
-    expect(hcmode, "status", "b51103")
-    expect(hcmode, "status_cir_pump", "b51200", "b51200")
+    expect(hcmode, "DateTime", "b50400")
+    expect(hcmode, "Status16", "b50416")
+    expect(hcmode, "Status01", "b51101")
+    expect(hcmode, "Status02", "b51102")
+    expect(hcmode, "Status", "b51103")
+    expect(hcmode, "StatusCirPump", "b51200", "b51200")
     expect(hcmode, "wm", "", "b505")
-    expect(hcmode, "set_mode", "b51000", "b51000")
+    expect(hcmode, "SetMode", "b51000", "b51000")
     expect_absent(hcmode, "rm", "inherited via date_time")
 
     # iotesthp_inc: write-only commands carry wid only.
     iotesthp = entries_for("src/vaillant/iotesthp_inc.tsp")
-    expect(iotesthp, "iotest", "", "b50602")
-    expect(iotesthp, "ioteststop", "", "b50601")
+    expect(iotesthp, "Iotest", "", "b50602")
+    expect(iotesthp, "Ioteststop", "", "b50601")
     expect(iotesthp, "rm", "b504")
     expect(iotesthp, "wm", "", "b505")
 
     # errors_inc: @base D-byte tails, write-only clear.
     errors = entries_for("src/vaillant/errors_inc.tsp")
-    expect(errors, "currenterror", "b5030001")
-    expect(errors, "errorhistory", "b5030101")
-    expect(errors, "clearerrorhistory", "", "b5030201")
+    expect(errors, "Currenterror", "b5030001")
+    expect(errors, "Errorhistory", "b5030101")
+    expect(errors, "Clearerrorhistory", "", "b5030201")
 
     # 05.vd4: wid inheritance through is-template flatten, BI gate.
     vd4 = entries_for("src/vaillant/05.vd4.tsp")
-    expect(vd4, "enable_monitoring", "b5090d0100", "b5090e0100")
-    expect(vd4, "switch_relays", "b5090d2700", "b5090e2700")
-    expect(vd4, "actual_digital_inputs", "b5090d3a00", "b5090e3a00")
+    expect(vd4, "EnableMonitoring", "b5090d0100", "b5090e0100")
+    expect(vd4, "SwitchRelays", "b5090d2700", "b5090e2700")
+    expect(vd4, "ActualDigitalInputs", "b5090d3a00", "b5090e3a00")
 
     # 08.ehp: concat ids, imported models, phase NOT gated.
     ehp = entries_for("src/vaillant/08.ehp.tsp")
-    expect(ehp, "comp_starts_hwc", "b5090da800")
-    expect(ehp, "phase_status", "b5090d8800")
-    expect(ehp, "date_time", "b50400")
-    expect(ehp, "iotest", "", "b50602")
-    expect(ehp, "clearerrorhistory", "", "b5030201")
-    expect(ehp, "set_mode", "b51000", "b51000")
+    expect(ehp, "CompStartsHwc", "b5090da800")
+    expect(ehp, "PhaseStatus", "b5090d8800")
+    expect(ehp, "DateTime", "b50400")
+    expect(ehp, "Iotest", "", "b50602")
+    expect(ehp, "Clearerrorhistory", "", "b5030201")
+    expect(ehp, "SetMode", "b51000", "b51000")
 
     # broadcast: b/wi write side shares the base tail; archived ZZ is FE
     # (alias BROADCAST = Targets.broadcast resolves via union constants).
     broadcast = entries_for("src/vaillant/broadcast.tsp")
-    expect(broadcast, "vdatetime", "b51600", "b51600")
-    expect(broadcast, "outsidetemp", "b51601")
-    expect(broadcast, "hwc_status", "b50527")
-    expect(broadcast, "load", "b50506")
-    expect_zz(broadcast, "vdatetime", "fe")
-    expect_zz(broadcast, "outsidetemp", "fe")
-    expect_zz(hcmode, "date_time", "08")
+    expect(broadcast, "Vdatetime", "b51600", "b51600")
+    expect(broadcast, "Outsidetemp", "b51601")
+    expect(broadcast, "HwcStatus", "b50527")
+    expect(broadcast, "Load", "b50506")
+    expect_zz(broadcast, "Vdatetime", "fe")
+    expect_zz(broadcast, "Outsidetemp", "fe")
+    expect_zz(hcmode, "DateTime", "08")
 
     # 15.e7c: is-template + @ext variadic ids/wids.
     e7c = entries_for("src/vaillant/15.e7c.tsp")
-    expect(e7c, "heating_schedule_enable", "b5090d0200", "b5090e0200")
-    expect(e7c, "monday_heating_time", "b5090d0500", "b5090e0500")
+    expect(e7c, "HeatingScheduleEnable", "b5090d0200", "b5090e0200")
+    expect(e7c, "MondayHeatingTime", "b5090d0500", "b5090e0500")
 
     # 15.392: timer PBSB (B515) and per-direction PBSB (r B504 / w B505).
     t392 = entries_for("src/vaillant/15.392.tsp")
-    expect(t392, "cc_timer__monday", "b5150002", "b5150002")
-    expect(t392, "setpoints__monday", "b5041901", "b5052e01")
+    expect(t392, "CcTimer_Monday", "b5150002", "b5150002")
+    expect(t392, "Setpoints_Monday", "b5041901", "b5052e01")
 
     # Byte positions: 1-based data-part offsets, not field ordinals —
     # successors of multi-byte fields shift (char3@2 → char4@5 → d2b@9).
-    expect_positions(hcmode, "date_time", [1, 2, 5, 9])
-    expect_positions(broadcast, "vdatetime", [1, 4])
-    expect_positions(e7c, "monday_heating_temp", [1, 3, 5, 7, 9, 11, 13])
+    expect_positions(hcmode, "DateTime", [1, 2, 5, 9])
+    expect_positions(broadcast, "Vdatetime", [1, 4])
+    expect_positions(e7c, "MondayHeatingTemp", [1, 3, 5, 7, 9, 11, 13])
 
     # Composite expansion: plain models become positioned leaf sub-fields
     # (full field path joined with '_'); consecutive BI0..BI7 runs collapse
     # into one UINT8 field carrying the `bits` name->bit map.
     expect_fields(
-        errors, "currenterror",
+        errors, "Currenterror",
         ["value_error", "value_error_1", "value_error_2",
          "value_error_3", "value_error_4"],
     )
-    expect_positions(errors, "currenterror", [1, 3, 5, 7, 9])
+    expect_positions(errors, "Currenterror", [1, 3, 5, 7, 9])
     expect_fields(
-        errors, "errorhistory",
+        errors, "Errorhistory",
         ["index", "errorhistory_status", "errorhistory_time",
          "errorhistory_date", "errorhistory_error"],
     )
-    expect_positions(errors, "errorhistory", [1, 2, 3, 5, 8])
+    expect_positions(errors, "Errorhistory", [1, 2, 3, 5, 8])
     expect_fields(
-        t392, "cc_timer__monday",
+        t392, "CcTimer_Monday",
         ["value_slot1_slot_from", "value_slot1_slot_to",
          "value_slot1_slot_1_from", "value_slot1_slot_1_to",
          "value_slot1_slot_2_from", "value_slot1_slot_2_to",
          "value_daysel"],
     )
-    expect_positions(t392, "cc_timer__monday", [1, 2, 3, 4, 5, 6, 7])
-    expect_fields(ehp, "phase_status", ["value_phase"])
+    expect_positions(t392, "CcTimer_Monday", [1, 2, 3, 4, 5, 6, 7])
+    expect_fields(ehp, "PhaseStatus", ["value_phase"])
     expect_bits(
-        ehp, "phase_status", "value_phase",
+        ehp, "PhaseStatus", "value_phase",
         {"value_phase": 0, "value_phase_1": 1, "value_phase_2": 2},
     )
     expect_fields(
-        hcmode, "set_mode",
+        hcmode, "SetMode",
         ["hcmode", "flowtempdesired", "hwctempdesired", "hwcflowtempdesired",
          "ign", "disablehc", "ign_1", "remoteControlHcPump"],
     )
-    expect_positions(hcmode, "set_mode", [1, 2, 3, 4, 5, 6, 7, 8])
+    expect_positions(hcmode, "SetMode", [1, 2, 3, 4, 5, 6, 7, 8])
     expect_bits(
-        hcmode, "set_mode", "disablehc",
+        hcmode, "SetMode", "disablehc",
         {"disablehc": 0, "disablehwctapping": 1, "disablehwcload": 2},
     )
     expect_bits(
-        hcmode, "set_mode", "remoteControlHcPump",
+        hcmode, "SetMode", "remoteControlHcPump",
         {"remoteControlHcPump": 0, "releaseBackup": 1, "releaseCooling": 2},
     )
     expect_fields(
-        ehp, "set_mode",
+        ehp, "SetMode",
         ["hcmode", "flowtempdesired", "hwctempdesired", "hwcflowtempdesired",
          "ign", "disablehc", "ign_1", "remoteControlHcPump"],
     )
-    expect_fields(vd4, "switch_relays", ["bi"])
-    expect_positions(vd4, "switch_relays", [1])
-    expect_bits(vd4, "switch_relays", "bi", {"bi": 0, "bi_1": 1})
-    expect_fields(vd4, "actual_digital_inputs", ["bi"])
-    expect_positions(vd4, "actual_digital_inputs", [1])
-    expect_bits(vd4, "actual_digital_inputs", "bi", {"bi": 0, "bi_1": 1})
+    expect_fields(vd4, "SwitchRelays", ["bi"])
+    expect_positions(vd4, "SwitchRelays", [1])
+    expect_bits(vd4, "SwitchRelays", "bi", {"bi": 0, "bi_1": 1})
+    expect_fields(vd4, "ActualDigitalInputs", ["bi"])
+    expect_positions(vd4, "ActualDigitalInputs", [1])
+    expect_bits(vd4, "ActualDigitalInputs", "bi", {"bi": 0, "bi_1": 1})
 
     if _failures:
         print(f"FAIL: {_failures.__len__()}/{_checks} checks failed")

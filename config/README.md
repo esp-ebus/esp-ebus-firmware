@@ -62,7 +62,19 @@ Commands are defined as a JSON array of objects. Each command object specifies a
 
 #### Command Properties
 - **`key`** *(string)*: Unique decimal or hexadecimal identifier for the command (e.g. `"09"` or `"43"`). Used as prefix for HA `unique_id` and MQTT control topic (`ebus/<id>/set/<key>`).
-- **`name`** *(string)*: Command name hierarchy using slashes and underscores (e.g. `"Buffer/Middle_Temperature"`). Generates MQTT value subtopic `ebus/<id>/values/buffer/middle_temperature`.
+- **`name`** *(string)*: Command name. The hand-written `config/*.json` files
+  use a hierarchy with slashes and underscores (e.g.
+  `"Buffer/Middle_Temperature"`), which the runtime lowercases into the MQTT
+  value subtopic as `ebus/<id>/values/<key>/<name>` (e.g.
+  `ebus/820b80/values/09/buffer/middle_temperature`) — the `<key>` segment
+  (unique per slave/file/id) disambiguates same-named registers across
+  units, and a `/` in the name still starts a new subtopic, so
+  `Buffer/#` subscribes to all Buffer values. Home Assistant always uses
+  exactly one `state_topic` per entity regardless of topic depth; the `/`
+  is only rewritten to `_` for the HA `object_id` (HA ids forbid `/`). The
+  generator (`tools/ebus-profile-gen`) emits the upstream TypeSpec model
+  name verbatim in PascalCase (e.g. `"CompStartsHwc"`) with no slashes —
+  see [`tools/ebus-profile-gen/README.md`](../tools/ebus-profile-gen/README.md).
 - **`zz`** *(hex string)*: 1-byte destination address of the telegram (e.g. `"08"`).
 - **`pbsb`** *(hex string)*: First 2 bytes (`PB SB`) of the read id without `zz` (e.g. `"b509"`). `""` for write-only commands.
 - **`dx`** *(hex string, optional)*: Read id tail `DD...` (0–4 bytes, e.g. `"290100"`); the read id is `pbsb` + `dx`. The read telegram is built as `zz PB SB NN dx...` with `NN = len(dx)` (example: `"08"` + `"b509"` + `"290100"` → `08b50903290100`).

@@ -95,7 +95,8 @@ class MqttHA {
   static void sanitizeObjectId(std::string_view source, char* out,
                                size_t max_len);
   void createStateTopic(char* out, size_t out_size, std::string_view prefix,
-                        std::string_view topic) const;
+                        std::string_view seg1,
+                        std::string_view seg2 = {}) const;
 
   struct KeyValueMapping {
     ebus::StaticVector<

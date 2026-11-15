@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from typing import Any, List
 
@@ -111,10 +110,12 @@ def main() -> int:
 
     fam = mapper.build_profiles_and_commands(raw, log=log)
 
-    # Derive key prefix: strip leading "NN." from the tsp stem (e.g.
-    # 08.ehp → ehp_, 05.vd6 → vd6_, 06.pms → pms_), then add underscore.
-    name = re.sub(r"^\d+\.?", "", tsp_stem)
-    default_prefix = f"{name.lower()}_" if name else ""
+    # Derive key prefix from the tsp stem verbatim, lowercased, e.g.
+    # 52.mc2.mc.4 → "52.mc2.mc.4_", 08.ehp → "08.ehp_". The leading
+    # "NN." is the slave address and must be kept: it is the only thing
+    # that disambiguates registers with the same model name across
+    # different units (e.g. FlowTemp in 52.mc2.mc.4 vs 53.mc2.mc.5).
+    default_prefix = f"{tsp_stem.lower()}_" if tsp_stem else ""
     key_prefix = args.key_prefix if args.key_prefix is not None else default_prefix
 
     # Convert to flat entries

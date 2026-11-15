@@ -8,6 +8,7 @@
 #include <string>
 
 #include "app/command_manager.hpp"
+#include "app/mqtt_topic.hpp"
 
 // clang-format off
 namespace {
@@ -18,7 +19,7 @@ inline constexpr size_t max_device_id_length = mqtt_ha_limits::max_device_id_len
 namespace mqtt_ha_buffer_limits {
 // Topic and ID limits
 inline constexpr size_t max_topic_length = 96;         // MQTT discovery topic (e.g., homeassistant/number/ebusXXXX/32_name/config)
-inline constexpr size_t max_state_topic_length = 96;   // State topic (e.g., ebusXXXX/values/commandname)
+inline constexpr size_t max_state_topic_length = 128;  // State topic (e.g., ebusXXXX/values/<key>/<name>)
 inline constexpr size_t max_object_id_length = 64;     // Sanitized object ID (e.g., 32_basement_temperature_nightroomsetpoint_value)
 inline constexpr size_t max_raw_object_id_length = 64; // Raw object ID before sanitization
 inline constexpr size_t max_uid_length = 48;           // Unique ID (e.g., ebusXXXX_32_0)
@@ -63,6 +64,7 @@ void formatPrettyName(std::string_view sv, char* out, size_t max_len) {
   }
   out[out_idx] = '\0';
 }
+
 }  // namespace
 
 void MqttHA::setUniqueId(const std::string& id) {
@@ -352,14 +354,17 @@ void MqttHA::publishComponent(const Command* command, size_t field_idx,
     }
 
     char state_topic_buf[mqtt_ha_buffer_limits::max_state_topic_length];
+    // State topic mirrors Mqtt::handleValueUpdate: values/<key>/<name> so
+    // the topic is unique per (slave, file, id) — the same model name
+    // (e.g. FlowTemp) resolves to different registers in different units.
     if (per_field) {
       const std::string_view field_topic_name =
           field_name_sv.empty() ? "value" : field_name_sv;
       createStateTopic(state_topic_buf, sizeof(state_topic_buf), "values",
-                       field_topic_name);
+                       key_sv, field_topic_name);
     } else {
       createStateTopic(state_topic_buf, sizeof(state_topic_buf), "values",
-                       command->getName());
+                       key_sv, command->getName());
     }
 
     char value_template_buf[mqtt_ha_buffer_limits::max_value_template_length];
@@ -578,23 +583,36 @@ void MqttHA::sanitizeObjectId(std::string_view source, char* out,
 }
 
 void MqttHA::createStateTopic(char* out, size_t out_size,
-                              std::string_view prefix,
-                              std::string_view topic) const {
+                              std::string_view prefix, std::string_view seg1,
+                              std::string_view seg2) const {
   char lower_buf[mqtt_ha_buffer_limits::max_lower_buf_length];
-  size_t tlen = std::min(topic.size(), sizeof(lower_buf) - 1);
-  for (size_t i = 0; i < tlen; i++) {
-    lower_buf[i] = std::tolower(static_cast<unsigned char>(topic[i]));
+  // Copy seg1 as-is (keys are already lowercase); toSnakeCase handles any
+  // PascalCase if present — but for pure-lowercase input it's a no-op.
+  size_t tlen1 = std::min(seg1.size(), sizeof(lower_buf) - 1);
+  for (size_t i = 0; i < tlen1; i++) {
+    lower_buf[i] = static_cast<char>(seg1[i]);
   }
-  lower_buf[tlen] = '\0';
-
+  tlen1 = toSnakeCase(lower_buf, tlen1);
+  // Copy seg2 (may be PascalCase, e.g. CompStartsHwc); toSnakeCase inserts
+  // underscores and lowercases in one pass, so we must NOT pre-lowercase.
+  size_t tlen2 = std::min(seg2.size(), sizeof(lower_buf) - 1 - tlen1 - 1);
+  for (size_t i = 0; i < tlen2; i++) {
+    lower_buf[tlen1 + i] = static_cast<char>(seg2[i]);
+  }
+  tlen2 = toSnakeCase(lower_buf + tlen1, tlen2);
+  lower_buf[tlen1 + tlen2] = '\0';
   int slen =
       snprintf(out, out_size, "%s%s", root_topic_.c_str(), prefix.data());
   if (slen < 0) return;
   if (!prefix.empty()) {
     if ((size_t)slen < out_size - 1) out[slen++] = '/';
   }
-  for (size_t i = 0; i < tlen && (size_t)slen < out_size - 1; i++) {
+  for (size_t i = 0; i < tlen1 && (size_t)slen < out_size - 1; i++) {
     out[slen++] = lower_buf[i];
+  }
+  if (!seg2.empty() && (size_t)slen < out_size - 1) out[slen++] = '/';
+  for (size_t i = 0; i < tlen2 && (size_t)slen < out_size - 1; i++) {
+    out[slen++] = lower_buf[tlen1 + i];
   }
   out[slen] = '\0';
 }

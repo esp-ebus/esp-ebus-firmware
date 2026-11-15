@@ -764,40 +764,19 @@ def _max_length_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[int]:
         return None
 
 
-def _camel_to_snake(name: str) -> str:
-    """Convert CamelCase or PascalCase to snake_case."""
-    # Insert underscore before capital letters, then lowercase
-    s1 = re.sub(r"([A-Z])", r"_\1", name)
-    return s1.lower().lstrip("_")
-
-
 def _format_command_name(model_name: str, namespace: str = "") -> str:
     """Format a command name from model name and namespace.
 
-    Converts CamelCase to hierarchy format like Buffer/Middle_Temperature
+    Emits the upstream TypeSpec model name verbatim (PascalCase, e.g.
+    ``CompHoursHwc``, ``Setpoints_Monday``) — no snake_case conversion, no
+    namespace prefix, no slash hierarchy. This matches the ebusd-configuration
+    CSV ``name`` column exactly, so regenerated output diffs cleanly against
+    upstream. The runtime passes the name through untouched
+    (``mqtt.cpp`` values topic, ``mqtt_ha.cpp`` state topic); the slash-based
+    grouping seen in hand-written ``config/*.json`` is a human-authored
+    convention and is not reproduced by the generator.
     """
-    # Split by namespace if present
-    parts = []
-    if namespace:
-        # Convert namespace to path-like (Vaillant.Ehp -> Ehp)
-        ns_parts = namespace.split(".")
-        for ns in ns_parts:
-            if ns and ns != "Vaillant":
-                parts.append(_camel_to_snake(ns))
-
-    # Add the model name
-    model_snake = _camel_to_snake(model_name)
-
-    # For models that look like they're in groups, split them
-    # e.g., "HwcTemp" -> we might want to keep as is or split
-    # But from the working commands.json, names are like:
-    # "Buffer/Middle_Temperature", "Compressor/Hours"
-    # So we need to understand the naming convention from ebusd-configuration
-
-    # For now, just use the model name as-is in snake_case
-    parts.append(model_snake)
-
-    return "/".join(parts) if parts else model_snake
+    return model_name
 
 
 def tsp_type_to_datatype(tsp_type: str) -> str:

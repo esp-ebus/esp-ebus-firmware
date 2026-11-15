@@ -127,11 +127,11 @@ TEST_CASE("MqttHA multi-field discovery follows the payload mode", "[mqttha]") {
     ha.publishComponent(cmd, 1, false);
     REQUIRE(recorder.messages.size() == 2);
     REQUIRE(payloadContains(recorder.messages[0],
-                            R"("state_topic":"ebus/820b80/values/temp01")"));
+                            R"("state_topic":"ebus/820b80/values/02/temp01")"));
     REQUIRE(payloadContains(recorder.messages[0],
                             R"("value_template":"{{value_json.temp01}}")"));
     REQUIRE(payloadContains(recorder.messages[1],
-                            R"("state_topic":"ebus/820b80/values/temp01")"));
+                            R"("state_topic":"ebus/820b80/values/02/temp01")"));
     REQUIRE(payloadContains(recorder.messages[1],
                             R"("value_template":"{{value_json.temp02}}")"));
   }
@@ -142,9 +142,9 @@ TEST_CASE("MqttHA multi-field discovery follows the payload mode", "[mqttha]") {
     ha.publishComponent(cmd, 1, false);
     REQUIRE(recorder.messages.size() == 2);
     REQUIRE(payloadContains(recorder.messages[0],
-                            R"("state_topic":"ebus/820b80/values/temp01")"));
+                            R"("state_topic":"ebus/820b80/values/02/temp01")"));
     REQUIRE(payloadContains(recorder.messages[1],
-                            R"("state_topic":"ebus/820b80/values/temp02")"));
+                            R"("state_topic":"ebus/820b80/values/02/temp02")"));
     REQUIRE(payloadContains(recorder.messages[1],
                             R"("value_template":"{{value_json.value}}")"));
   }
@@ -154,7 +154,7 @@ TEST_CASE("MqttHA multi-field discovery follows the payload mode", "[mqttha]") {
     ha.publishComponent(cmd, 1, false);
     REQUIRE(recorder.messages.size() == 1);
     REQUIRE(payloadContains(recorder.messages[0],
-                            R"("state_topic":"ebus/820b80/values/temp02")"));
+                            R"("state_topic":"ebus/820b80/values/02/temp02")"));
     REQUIRE(payloadContains(recorder.messages[0],
                             R"("value_template":"{{value}}")"));
   }
@@ -281,13 +281,13 @@ TEST_CASE("MqttHA publishes one binary_sensor per bit", "[mqttha]") {
   REQUIRE(payloadContains(bi, R"("value_template":"{{value_json.value}}")"));
   REQUIRE(payloadContains(bi, R"("payload_on":"1")"));
   REQUIRE(payloadContains(bi, R"("payload_off":"0")"));
-  REQUIRE(payloadContains(bi, R"(values/bi)"));
+  REQUIRE(payloadContains(bi, R"(values/03/bi)"));
 
   const PublishedMessage& bi1 = recorder.messages[1];
   REQUIRE(bi1.topic ==
           "homeassistant/binary_sensor/ebus820b80/03_hcmode_bi_1/config");
   REQUIRE(payloadContains(bi1, R"("unique_id":"ebus820b80_03_0_1")"));
-  REQUIRE(payloadContains(bi1, R"(values/bi_1)"));
+  REQUIRE(payloadContains(bi1, R"(values/03/bi_1)"));
 }
 
 TEST_CASE("MqttHA remove clears every bit entity", "[mqttha]") {
