@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     from .convlog import NULL_LOG, ConversionLog
@@ -300,6 +300,17 @@ def _parse_float(s: str) -> Optional[float]:
         return float(s)
     except ValueError:
         return None
+
+
+def _parse_number(s: str) -> Optional[Union[int, float]]:
+    """Parse a signed decimal, float, or hexadecimal numeric literal."""
+    value = s.strip()
+    if _HEX_RE.match(value.lstrip("+-")):
+        return int(value, 16)
+    try:
+        return int(value, 10)
+    except ValueError:
+        return _parse_float(value)
 
 
 def _short_path(path: str) -> str:
@@ -1199,6 +1210,10 @@ class TspParser:
                             field["meta"]["digits"] = len(s.split(".")[1].rstrip("0"))
                         else:
                             field["meta"]["digits"] = 0
+            elif dname in ("minValue", "maxValue") and args:
+                value = _parse_number(args[0])
+                if value is not None:
+                    field["meta"]["min" if dname == "minValue" else "max"] = value
             elif dname == "values":
                 if args:
                     enum_name = args[0].strip()
@@ -1395,9 +1410,9 @@ class TspParser:
                 if "." in s:
                     scalar["digits"] = len(s.split(".")[1].rstrip("0"))
             elif dname == "minValue" and args:
-                scalar["min"] = _parse_hex_or_int(args[0])
+                scalar["min"] = _parse_number(args[0])
             elif dname == "maxValue" and args:
-                scalar["max"] = _parse_hex_or_int(args[0])
+                scalar["max"] = _parse_number(args[0])
             elif dname == "values" and args:
                 scalar["values_enum"] = args[0].strip()
             elif dname == "maxLength" and args:

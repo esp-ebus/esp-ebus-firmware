@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple, Union
 
 try:
     from .model import FieldIR, ProfileIR, CommandIR, FamilyIR, profile_key_from_fields
@@ -751,6 +751,76 @@ def _parse_factor(args_str: Optional[str]) -> Optional[float]:
         return None
 
 
+def _profile_number(value: Any, default: int = 0) -> Union[int, float]:
+    """Normalize numeric profile metadata for identity and JSON output."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value) if isinstance(value, float) and value.is_integer() else value
+    text = str(value).strip()
+    try:
+        if re.fullmatch(r"[+-]?0[xX][0-9a-fA-F]+", text):
+            return int(text, 16)
+        try:
+            return int(text, 10)
+        except ValueError:
+            number = float(text)
+            return int(number) if number.is_integer() else number
+    except (TypeError, ValueError):
+        return default
+
+
+def _profile_signature(field: FieldIR) -> Tuple[Any, ...]:
+    """Identify a profile by all properties represented in data_profiles."""
+    meta = field.meta or {}
+    datatype = field.our_datatype or _map_type(
+        field.ebus_type, _max_length_from_meta(meta)
+    )
+    unit = field.unit or meta.get("unit", "") or ""
+    factor = field.factor or meta.get("factor") or meta.get("divisor")
+    divider = _parse_factor(str(factor)) if factor not in (None, "") else None
+    if divider is None:
+        divider = 1.0
+    try:
+        digits = int(meta.get("digits", 0) or 0)
+    except (TypeError, ValueError):
+        digits = 0
+    return (
+        datatype,
+        unit,
+        divider,
+        digits,
+        _profile_number(meta.get("min")),
+        _profile_number(meta.get("max")),
+    )
+
+
+def _profile_names_for_family(fam: FamilyIR) -> Dict[Tuple[Any, ...], str]:
+    """Return deterministic profile names shared by profile and command output."""
+    names: Dict[Tuple[Any, ...], str] = {}
+    used_names: set = set()
+    for command in fam.commands:
+        for field in command.fields:
+            signature = _profile_signature(field)
+            if signature in names or signature[0] not in SUPPORTED_DATATYPES:
+                continue
+            profile_name = _map_profile_name(
+                field.ebus_type,
+                signature[1],
+                _max_length_from_meta(field.meta),
+            )
+            original_name = profile_name
+            suffix = 1
+            while profile_name in used_names:
+                profile_name = f"{original_name}_{suffix}"
+                suffix += 1
+            names[signature] = profile_name
+            used_names.add(profile_name)
+    return names
+
+
 def _max_length_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[int]:
     """Parse @maxLength from field/scalar metadata (stored as a string)."""
     if not meta:
@@ -792,20 +862,18 @@ def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, A
 
     Entries are named canonically via _map_profile_name so that command
     field references (which use the same mapping) resolve to existing
-    profiles. Deduplication is by (datatype, unit, divider) so that two
-    fields with identical semantics share one profile entry.
+    profiles. Deduplication includes datatype, unit, divider, digits, and
+    min/max so fields with different profile metadata remain distinct.
     """
     log = log if log is not None else NULL_LOG
     entries: List[Dict[str, Any]] = []
+    profile_names = _profile_names_for_family(fam)
     seen: set = set()
-    used_names: set = set()
 
     for cmd in fam.commands:
         for f in cmd.fields:
-            datatype = f.our_datatype or _map_type(
-                f.ebus_type, _max_length_from_meta(f.meta)
-            )
-            unit = f.unit or ""
+            signature = _profile_signature(f)
+            datatype, unit, divider, digits, min_val, max_val = signature
 
             # Skip datatypes the ebus-library cannot decode/encode.
             # (e.g. CHAR17+, HEX17+, ERRORHISTORY, POWER, etc.)
@@ -821,13 +889,7 @@ def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, A
                 )
                 continue
 
-            # Deduplicate by profile identity (datatype, unit, divider)
-            try:
-                divider = float(f.factor) if f.factor else 1.0
-            except ValueError:
-                divider = 1.0
-            dedup_key = (datatype, unit, divider)
-            if dedup_key in seen:
+            if signature in seen:
                 log.debug(
                     "profile",
                     "profile entry deduplicated",
@@ -837,41 +899,9 @@ def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, A
                     unit=unit,
                 )
                 continue
-            seen.add(dedup_key)
+            seen.add(signature)
 
-            # Canonical profile name (same mapping commands use for references)
-            profile_name = _map_profile_name(
-                f.ebus_type, unit, _max_length_from_meta(f.meta)
-            )
-
-            # Disambiguate name collisions
-            original_name = profile_name
-            suffix = 1
-            while profile_name in used_names:
-                profile_name = f"{original_name}_{suffix}"
-                suffix += 1
-            used_names.add(profile_name)
-
-            # Parse digits from meta
-            digits = 0
-            meta_digits = f.meta.get("digits")
-            if isinstance(meta_digits, int):
-                digits = meta_digits
-            elif isinstance(meta_digits, str):
-                try:
-                    digits = int(meta_digits)
-                except ValueError:
-                    digits = 0
-
-            # Get min/max from meta
-            min_val = f.meta.get("min", 0)
-            max_val = f.meta.get("max", 0)
-
-            # Convert to int if they're whole numbers
-            if isinstance(min_val, float) and min_val.is_integer():
-                min_val = int(min_val)
-            if isinstance(max_val, float) and max_val.is_integer():
-                max_val = int(max_val)
+            profile_name = profile_names[signature]
 
             entry = {
                 "name": profile_name,
@@ -919,6 +949,7 @@ def commands_to_flat_entries(
     log = log if log is not None else NULL_LOG
     entries: List[Dict[str, Any]] = []
     seen_read_id: Dict[str, str] = {}
+    profile_names = _profile_names_for_family(fam)
 
     # Try to get MF from aliases if not in meta
     default_mf = 0x00
@@ -1026,9 +1057,11 @@ def commands_to_flat_entries(
         fields: List[Dict[str, Any]] = []
         byte_offset = 0
         for f in c.fields:
-            # Get the profile name based on type and unit
-            profile = _map_profile_name(
-                f.ebus_type, f.unit or "", _max_length_from_meta(f.meta)
+            profile = profile_names.get(
+                _profile_signature(f),
+                _map_profile_name(
+                    f.ebus_type, f.unit or "", _max_length_from_meta(f.meta)
+                ),
             )
 
             # Get min/max overrides from field meta
@@ -1562,6 +1595,10 @@ def build_profiles_and_commands(
 
                 # Merge metadata
                 merged_meta = {**type_meta, **f_meta}
+                if f.get("unit"):
+                    merged_meta["unit"] = f["unit"]
+                if f.get("factor"):
+                    merged_meta["factor"] = f["factor"]
 
                 # If field has its own decorators, extract metadata from them
                 for dec in f_decorators:

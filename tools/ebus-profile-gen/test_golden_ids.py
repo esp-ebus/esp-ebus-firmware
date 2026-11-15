@@ -6,8 +6,9 @@ the archived CSV ground truth (concatenation model: template PBSB +
 base D bytes + member ext), BI byte-grouping (consecutive BI0..BI7 runs
 collapse to one UINT8 field carrying a `bits` name->bit map), write-only
 commands with an empty id, 1-based byte positions of fields, and composite
-expansion field shapes (plain models → positioned leaves). Run from the
-repo root:
+expansion field shapes (plain models → positioned leaves). It also checks
+that TypeSpec field metadata reaches command fields and matching data
+profiles. Run from the repo root:
 
     python3 tools/ebus-profile-gen/test_golden_ids.py
 """
@@ -16,11 +17,12 @@ from __future__ import annotations
 import os
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import mapper  # noqa: E402
+from model import FamilyIR  # noqa: E402
 import resolver  # noqa: E402
 import tsp_parser  # noqa: E402
 from convlog import NULL_LOG  # noqa: E402
@@ -35,12 +37,18 @@ _failures: List[str] = []
 _checks = 0
 
 
-def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Run the generate.py pipeline in-process and index entries by name."""
+def family_for(tsp_rel: str) -> Tuple[Dict[str, Any], FamilyIR, List[str]]:
+    """Resolve and parse one tsp input into its raw IR and family."""
     res = resolver.IncludeResolver(_EBUSD_ROOT, _TYPESPEC_ROOT)
     files = res.resolve(tsp_rel)
     raw = tsp_parser.TspParser(files).parse()
     fam = mapper.build_profiles_and_commands(raw, log=NULL_LOG)
+    return raw, fam, files
+
+
+def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Run the generate.py pipeline in-process and index entries by name."""
+    raw, fam, files = family_for(tsp_rel)
     # Key prefix mirrors generate.py: the tsp stem verbatim, lowercased
     # (52.mc2.mc.4 → "52.mc2.mc.4_"). The leading "NN." is the slave
     # address and is kept — it is the only thing that disambiguates
@@ -75,6 +83,18 @@ def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
     for e in entries:
         by_name.setdefault(e["name"], []).append(e)
     return by_name
+
+
+def profile_outputs_for(
+    tsp_rel: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Return generated profiles and commands for metadata assertions."""
+    raw, fam, _ = family_for(tsp_rel)
+    profiles = mapper.profiles_to_flat_entries(fam, log=NULL_LOG)
+    commands = mapper.commands_to_flat_entries(
+        fam, aliases=raw.get("aliases", {}), log=NULL_LOG
+    )
+    return profiles, commands
 
 
 def expect(
@@ -235,6 +255,63 @@ def expect_bits(
         _failures.append(str(exc))
 
 
+def expect_profile_metadata(
+    profiles: List[Dict[str, Any]],
+    commands: List[Dict[str, Any]],
+    command_name: str,
+    field_values: Dict[str, Any],
+    profile_values: Dict[str, Any],
+    field_name: Optional[str] = None,
+) -> None:
+    """Assert field metadata and its referenced profile carry expected values."""
+    global _checks
+    _checks += 1
+    try:
+        command = next(c for c in commands if c["name"] == command_name)
+        fields = [
+            f for f in command["fields"]
+            if field_name is None or f["name"] == field_name
+        ]
+        assert len(fields) == 1, (
+            f"{command_name}: expected one matching field, got {fields}"
+        )
+        field = fields[0]
+        for key, value in field_values.items():
+            assert field.get(key) == value, (
+                f"{command_name}: expected field {key}={value!r}, "
+                f"got {field.get(key)!r}"
+            )
+        profile = next(
+            (p for p in profiles if p["name"] == field["profile"]), None
+        )
+        assert profile is not None, (
+            f"{command_name}: profile {field['profile']!r} was not emitted"
+        )
+        for key, value in profile_values.items():
+            assert profile.get(key) == value, (
+                f"{command_name}: expected profile {key}={value!r}, "
+                f"got {profile.get(key)!r}"
+            )
+    except (AssertionError, StopIteration) as exc:
+        _failures.append(f"{command_name}: {exc}")
+
+
+def expect_distinct_profile_refs(
+    commands: List[Dict[str, Any]], first_name: str, second_name: str
+) -> None:
+    """Assert metadata variants reference distinct generated profiles."""
+    global _checks
+    _checks += 1
+    try:
+        first = next(c for c in commands if c["name"] == first_name)
+        second = next(c for c in commands if c["name"] == second_name)
+        assert first["fields"][0]["profile"] != second["fields"][0]["profile"], (
+            f"{first_name} and {second_name} share a profile despite different metadata"
+        )
+    except (AssertionError, StopIteration) as exc:
+        _failures.append(f"profile variants: {exc}")
+
+
 def main() -> int:
     # hcmode_inc: @inherit chains, BI gate, no fabricated 0x0d.
     hcmode = entries_for("src/vaillant/hcmode_inc.tsp")
@@ -362,12 +439,52 @@ def main() -> int:
     expect_positions(vd4, "ActualDigitalInputs", [1])
     expect_bits(vd4, "ActualDigitalInputs", "bi", {"bi": 0, "bi_1": 1})
 
+    # Field-level metadata is emitted on both command fields and the
+    # corresponding profile; differing limits/precision must not deduplicate.
+    ctlv2_profiles, ctlv2_commands = profile_outputs_for(
+        "src/vaillant/15.ctlv2.tsp"
+    )
+    expect_profile_metadata(
+        ctlv2_profiles,
+        ctlv2_commands,
+        "CylinderChargeHyst",
+        {"min": 3, "max": 20},
+        {"unit": "K", "digits": 1, "min": 3, "max": 20},
+    )
+    expect_profile_metadata(
+        ctlv2_profiles,
+        ctlv2_commands,
+        "CylinderChargeOffset",
+        {"min": 0, "max": 40},
+        {"unit": "K", "digits": 0, "min": 0, "max": 40},
+    )
+    expect_distinct_profile_refs(
+        ctlv2_commands, "CylinderChargeHyst", "CylinderChargeOffset"
+    )
+
+    ehp_profiles, ehp_commands = profile_outputs_for("src/vaillant/08.ehp.tsp")
+    expect_profile_metadata(
+        ehp_profiles,
+        ehp_commands,
+        "HwcTemp",
+        {"min": -50, "max": 180},
+        {"unit": "°C", "digits": 1, "min": -50, "max": 180},
+        field_name="value_temp",
+    )
+    expect_profile_metadata(
+        ehp_profiles,
+        ehp_commands,
+        "ActualEnvironmentPowerFine",
+        {},
+        {"unit": "kW", "divider": 10.0, "digits": 0, "min": 0, "max": 0},
+    )
+
     if _failures:
         print(f"FAIL: {_failures.__len__()}/{_checks} checks failed")
         for f in _failures:
             print(f"  - {f}")
         return 1
-    print(f"OK: {_checks} golden id checks passed")
+    print(f"OK: {_checks} generator checks passed")
     return 0
 
 

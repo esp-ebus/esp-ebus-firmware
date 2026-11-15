@@ -158,6 +158,9 @@ python3 tools/ebus-profile-gen/generate.py \
 - TypeSpec file parsing (including models with explicit fields)
 - Template handling, including multi-parameter definitions, field expansion,
   and namespace-aware model lookup
+- Field-level `@unit`, `@factor`/`@divisor`, `@step`, `@minValue`, and
+  `@maxValue` metadata reaches profiles; min/max also become command-field
+  overrides
 - Type mapping from TypeSpec types to project datatypes (partial)
 - JSON output generation
 - Decorator capture for all models (including those with bodies)
@@ -180,19 +183,12 @@ python3 tools/ebus-profile-gen/generate.py \
      `config/*.json` and is deliberately **not** reproduced by the generator —
      see `config/README.md`.
 
-3. **Data profile fields**
-   - Currently: Basic fields with no min/max values
-   - Expected: Populate divider, digits, min, max from scalar definitions and @step decorators
-   - Fix needed: Extract and apply metadata from TypeSpec scalars and decorators
-
 ### Next Steps
 
 The critical parser bug (double increment in `_parse_model_inline`) has been fixed. All models, including those with explicit field bodies, now have their decorators properly captured.
 
 Remaining work focuses on the mapper to improve output quality:
    1. Improve profile name mapping to use existing profile names
-   2. Populate data profile metadata (divider, digits, min, max) from TypeSpec
-      definitions
    *(Command name formatting is settled — see item 2 above; the slash-based
    hierarchy is a hand-written `config/*.json` convention, not a generator
    target.)*
