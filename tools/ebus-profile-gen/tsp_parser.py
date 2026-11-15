@@ -55,10 +55,10 @@ _ENUM_ENTRY_RE = re.compile(r"^\s*(\w+)\s*:\s*(0x[0-9a-fA-F]+|\d+)\s*,?\s*$")
 
 # Matches a model: model Name { (possibly with fields on same line)
 _MODEL_RE = re.compile(r"^\s*model\s+(\w+)\s*\{\s*(.*?)\s*\}\s*$")
-# Matches a generic model: model Name<T> { ... }
-_MODEL_GENERIC_RE = re.compile(r"^\s*model\s+(\w+)\s*<(\w+)>\s*\{\s*(.*?)\s*\}\s*$")
-# Matches a generic model open declaration: model Name<T> {
-_MODEL_GENERIC_OPEN_RE = re.compile(r"^\s*model\s+(\w+)\s*<(\w+)>\s*\{\s*$")
+# Matches a generic model: model Name<T> { ... } (or multi-param: <T, U>)
+_MODEL_GENERIC_RE = re.compile(r"^\s*model\s+(\w+)\s*<([^>]*)>\s*\{\s*(.*?)\s*\}\s*$")
+# Matches a generic model open declaration: model Name<T> { (or multi-param)
+_MODEL_GENERIC_OPEN_RE = re.compile(r"^\s*model\s+(\w+)\s*<([^>]*)>\s*\{\s*$")
 _MODEL_OPEN_RE = re.compile(r"^\s*model\s+(\w+)\s*\{\s*$")
 
 # Matches a model template: model Name is Template<Type>;
@@ -192,6 +192,95 @@ def _namespace_map(lines: SourceLines) -> Dict[int, str]:
                     stack.pop()
         ns_map[lineno] = current()
     return ns_map
+
+
+def _split_template_params(params_str: str) -> List[str]:
+    """Split template parameter list by commas, respecting nested <> and quotes.
+
+    Examples:
+        "T" -> ["T"]
+        "T, U" -> ["T", "U"]
+        "T, suffixValue extends valueof string = \"9d010000\"" ->
+            ["T", "suffixValue extends valueof string = \"9d010000\""]
+    """
+    if not params_str.strip():
+        return []
+    parts = []
+    current = ""
+    depth = 0
+    in_quote = False
+    quote_char = None
+
+    for char in params_str:
+        if in_quote:
+            current += char
+            if char == quote_char:
+                in_quote = False
+                quote_char = None
+        elif char in ('"', "'"):
+            current += char
+            in_quote = True
+            quote_char = char
+        elif char == '<':
+            depth += 1
+            current += char
+        elif char == '>':
+            depth -= 1
+            current += char
+        elif char == ',' and depth == 0 and not in_quote:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+
+    if current.strip():
+        parts.append(current)
+    return parts
+
+
+def _parse_template_params(params_str: str) -> List[Dict[str, str]]:
+    """Parse TypeSpec template parameter list into structured parameters.
+
+    Handles:
+    - Simple: "T"
+    - Multiple: "T, U"
+    - With constraints: "T extends Type"
+    - With defaults: "T = Default"
+    - Complex: "T, suffixValue extends valueof string = \"9d010000\""
+
+    Returns:
+        List of parameter dicts with keys: name, extends, default
+    """
+    if not params_str.strip():
+        return []
+
+    param_parts = _split_template_params(params_str)
+    params = []
+
+    for part in param_parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        param = {"name": part}
+
+        # Parse extends clause with optional default
+        # Pattern: Name extends Type [= default]
+        # Use non-greedy match to handle spaces in extends type
+        extends_match = re.match(r'^(\w+)\s+extends\s+([^=]+?)(?:\s*=\s*(.*))?$', part)
+        if extends_match:
+            param["name"] = extends_match.group(1)
+            param["extends"] = extends_match.group(2)
+            if extends_match.group(3):
+                param["default"] = extends_match.group(3).strip().strip('"\'')
+        # Parse simple default (without extends)
+        elif '=' in part:
+            name_part, default_part = part.split('=', 1)
+            param["name"] = name_part.strip()
+            param["default"] = default_part.strip().strip('"\'')
+
+        params.append(param)
+    return params
 
 
 def _parse_hex_or_int(s: str) -> Optional[int]:
@@ -570,6 +659,7 @@ class TspParser:
                         namespace=namespace,
                     )
                     reg["register"]["template_type"] = type_param
+                    reg["register"]["template_params"] = _parse_template_params(type_param)
                     i = reg["next_i"]
                     ir["registers"].append(reg["register"])
                     continue
@@ -614,6 +704,7 @@ class TspParser:
                         namespace=namespace,
                     )
                     reg["register"]["template_type"] = type_param
+                    reg["register"]["template_params"] = _parse_template_params(type_param)
                     i = reg["next_i"]
                     ir["registers"].append(reg["register"])
                     continue
@@ -635,6 +726,7 @@ class TspParser:
                     )
                     reg['template'] = template_name
                     reg['template_type'] = type_param
+                    reg['template_params'] = _parse_template_params(type_param)
                     # Flatten `is Template<T>` into an @inherit parent so
                     # the template's resolved id/wid tails propagate.
                     reg['inherit'] = list(reg.get('inherit') or []) + [
@@ -941,6 +1033,7 @@ class TspParser:
                     namespace=namespace,
                 )
                 reg["register"]["template_type"] = type_param
+                reg["register"]["template_params"] = _parse_template_params(type_param)
                 i = reg["next_i"]
                 ir["registers"].append(reg["register"])
                 continue
@@ -962,6 +1055,7 @@ class TspParser:
                 )
                 reg["template"] = template_name
                 reg["template_type"] = type_param
+                reg["template_params"] = _parse_template_params(type_param)
                 # Flatten `is Template<T>` into an @inherit parent so the
                 # template's resolved id/wid tails propagate.
                 reg["inherit"] = list(reg.get("inherit") or []) + [
