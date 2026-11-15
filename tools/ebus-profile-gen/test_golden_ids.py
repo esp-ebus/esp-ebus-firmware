@@ -14,6 +14,7 @@ repo root:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -46,8 +47,29 @@ def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
     # same-named registers across units (FlowTemp in 52 vs 53).
     stem = os.path.splitext(os.path.basename(tsp_rel))[0]
     prefix = f"{stem.lower()}_" if stem else ""
+
+    # Derive default ZZ mirroring generate.py
+    default_zz: int = 0x08
+    stem_m = re.match(r"^([0-9a-fA-F]{2})\.", stem)
+    if stem_m:
+        default_zz = int(stem_m.group(1), 16)
+    elif files:
+        try:
+            with open(files[0], "r", encoding="utf-8") as f:
+                content = f.read()
+            comm_m = re.search(r"//\s*@zz\(([^)]+)\)", content)
+            if comm_m:
+                val_str = comm_m.group(1).strip()
+                default_zz = int(val_str, 0)
+        except Exception:
+            pass
+
     entries = mapper.commands_to_flat_entries(
-        fam, key_prefix=prefix, aliases=raw.get("aliases", {}), log=NULL_LOG
+        fam,
+        key_prefix=prefix,
+        aliases=raw.get("aliases", {}),
+        log=NULL_LOG,
+        default_zz=default_zz,
     )
     by_name: Dict[str, List[Dict[str, Any]]] = {}
     for e in entries:
@@ -244,6 +266,7 @@ def main() -> int:
     expect(vd4, "EnableMonitoring", "b5090d0100", "b5090e0100")
     expect(vd4, "SwitchRelays", "b5090d2700", "b5090e2700")
     expect(vd4, "ActualDigitalInputs", "b5090d3a00", "b5090e3a00")
+    expect_zz(vd4, "EnableMonitoring", "05")
 
     # 08.ehp: concat ids, imported models, phase NOT gated.
     ehp = entries_for("src/vaillant/08.ehp.tsp")
@@ -253,6 +276,8 @@ def main() -> int:
     expect(ehp, "Iotest", "", "b50602")
     expect(ehp, "Clearerrorhistory", "", "b5030201")
     expect(ehp, "SetMode", "b51000", "b51000")
+    expect_zz(ehp, "CompStartsHwc", "08")
+    expect_zz(ehp, "HwcTemp", "25")
 
     # broadcast: b/wi write side shares the base tail; archived ZZ is FE
     # (alias BROADCAST = Targets.broadcast resolves via union constants).
@@ -269,11 +294,13 @@ def main() -> int:
     e7c = entries_for("src/vaillant/15.e7c.tsp")
     expect(e7c, "HeatingScheduleEnable", "b5090d0200", "b5090e0200")
     expect(e7c, "MondayHeatingTime", "b5090d0500", "b5090e0500")
+    expect_zz(e7c, "HeatingScheduleEnable", "15")
 
     # 15.392: timer PBSB (B515) and per-direction PBSB (r B504 / w B505).
     t392 = entries_for("src/vaillant/15.392.tsp")
     expect(t392, "CcTimer_Monday", "b5150002", "b5150002")
     expect(t392, "Setpoints_Monday", "b5041901", "b5052e01")
+    expect_zz(t392, "CcTimer_Monday", "15")
 
     # Byte positions: 1-based data-part offsets, not field ordinals —
     # successors of multi-byte fields shift (char3@2 → char4@5 → d2b@9).

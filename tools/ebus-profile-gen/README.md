@@ -74,10 +74,10 @@ By default the CLI writes raw generated output to `tools/ebus-profile-gen/genera
   `{key, name, zz, pbsb, [dx], [nn], wpbsb, [wdx], interval, master, fields: [{name, profile, position, ha_profile, [bits]}]}`.
   `wpbsb`/`wdx` are omitted for read-only commands, `interval` defaults to 0 (passive only), `master` defaults to false, `ha_profile` is empty — fill these in by hand (exception: fields carrying a `bits` map get `ha_profile: "binary_sensor"` automatically — one HA binary_sensor per bit).
   `bits` appears on byte-grouped bitfield fields (consecutive `BI0`–`BI7` children collapsed into one `UINT8` byte) as a map of sub-field name to bit index within that byte.
-  `zz` is the destination byte; the read id splits into `pbsb` (`PB SB`, always present, `""` for write-only) and `dx` (the `Dx...` tail, 0–4 bytes), the write id into `wpbsb`/`wdx` with the same layout (concatenated ids are 2–6 bytes). The tail is the resolved `@base`/`@inherit` D bytes plus the model's own `@ext` bytes (no default `0x0d` is invented); read NN is derived as `len(dx)` (= `len(id)-2`) unless an explicit `nn` override is given (the runtime write NN also counts the appended value bytes). Write-only commands carry an empty `pbsb` (`""`) and the addressing in `wpbsb`/`wdx` alone.
-  `key` is prefixed (default: derived from tsp filename, e.g. `08.ehp.tsp`
-      → `ehp_`), with a sequential id appended (e.g. `ehp_001`). The full
-      lowercased tsp stem is preserved as the prefix — `52.mc2.mc.4.tsp` →
+  `zz` is the destination byte. An explicit `@zz` on the command or an inherited model takes precedence; otherwise it comes from `--zz`, a leading two-digit hex address in the tsp filename (e.g. `52.` → `52`), a numeric commented `// @zz(0x...)` in the entry file, or the fallback `08`. The read id splits into `pbsb` (`PB SB`, always present, `""` for write-only) and `dx` (the `Dx...` tail, 0–4 bytes), the write id into `wpbsb`/`wdx` with the same layout (concatenated ids are 2–6 bytes). The tail is the resolved `@base`/`@inherit` D bytes plus the model's own `@ext` bytes (no default `0x0d` is invented); read NN is derived as `len(dx)` (= `len(id)-2`) unless an explicit `nn` override is given (the runtime write NN also counts the appended value bytes). Write-only commands carry an empty `pbsb` (`""`) and the addressing in `wpbsb`/`wdx` alone.
+  `key` is prefixed (default: the full lowercased tsp stem, e.g.
+      `08.ehp.tsp` → `08.ehp_`), with a sequential id appended (e.g.
+      `08.ehp_001`). The full stem is preserved — `52.mc2.mc.4.tsp` →
       `52.mc2.mc.4_050` — so keys stay unique per (slave, file, id) even when
       different units carry registers of the same name (see
       `config/README.md`). Use `--key-prefix` to override the default prefix.
@@ -130,6 +130,11 @@ python3 tools/ebus-profile-gen/generate.py \
   src/vaillant/08.ehp.tsp \
   --key-prefix vaillant_ \
   --out-commands my-commands.json
+
+# Override the destination address (a hexadecimal byte)
+python3 tools/ebus-profile-gen/generate.py \
+  src/vaillant/08.ehp.tsp \
+  --zz 52
 ```
 
 ## Current Status and Known Issues
@@ -146,17 +151,12 @@ python3 tools/ebus-profile-gen/generate.py \
 
 ### Known Issues
 
-1. **Command key generation**
-   - Currently: `ehp_001`, `ehp_002`, ... (sequential with prefix)
-   - Expected: Simple hex or decimal strings like `"09"`, `"32"`, `"a8"`
-   - Fix needed: Use `ext_pb` from decorator as the key, formatted as hex
-
-2. **Profile name mapping**
+1. **Profile name mapping**
    - Currently: Using basic type names like `"uint32"`, `"int16"`
    - Expected: Using existing profile names from `profiles/data_profiles.json` like `"data2c_celsius"`, `"uint32_hour"`
    - Fix needed: Map TypeSpec scalar types (cntstarts, tempsensor, presssensor, etc.) to appropriate profile names
 
-3. **Command name formatting** — Status: FIXED 2026-12-19
+2. **Command name formatting** — Status: settled
    - Now: Upstream TypeSpec model name verbatim, PascalCase
      (e.g. `"CompStartsHwc"`, `"Setpoints_Monday"`)
    - Previously: snake_case (`"comp_starts_hwc"`)
@@ -166,7 +166,7 @@ python3 tools/ebus-profile-gen/generate.py \
      `config/*.json` and is deliberately **not** reproduced by the generator —
      see `config/README.md`.
 
-4. **Data profile fields**
+3. **Data profile fields**
    - Currently: Basic fields with no min/max values
    - Expected: Populate divider, digits, min, max from scalar definitions and @step decorators
    - Fix needed: Extract and apply metadata from TypeSpec scalars and decorators
@@ -176,12 +176,10 @@ python3 tools/ebus-profile-gen/generate.py \
 The critical parser bug (double increment in `_parse_model_inline`) has been fixed. All models, including those with explicit field bodies, now have their decorators properly captured.
 
 Remaining work focuses on the mapper to improve output quality:
-   1. Fix command key generation to use `ext_pb` from decorators
-   2. Correct the `read_cmd` format to include proper MF, PB, SB values
-   3. Improve profile name mapping to use existing profile names
-   4. Populate data profile metadata (divider, digits, min, max) from TypeSpec
+   1. Improve profile name mapping to use existing profile names
+   2. Populate data profile metadata (divider, digits, min, max) from TypeSpec
       definitions
-   *(Command name formatting is settled — see item 3 above; the slash-based
+   *(Command name formatting is settled — see item 2 above; the slash-based
    hierarchy is a hand-written `config/*.json` convention, not a generator
    target.)*
 
@@ -191,6 +189,10 @@ Defaults:
 - `--key-prefix`: derived from the full lowercased tsp stem (e.g.
   `08.ehp.tsp` → `08.ehp_`, `52.mc2.mc.4.tsp` → `52.mc2.mc.4_`); override
   with `--key-prefix` to use a different stem or strip the slave address
+- `--zz`: optional hexadecimal destination byte override (`00`–`ff`); absent
+  an override, the generator derives ZZ from the filename prefix, then a
+  numeric commented `// @zz(0x...)` in the entry file, and finally falls back
+  to `08`. Explicit command/model `@zz` metadata takes precedence.
 - `--out-generated`: `tools/ebus-profile-gen/generated/`
 - `--validate`: true (fail on constraint violations)
 - `--log`: `<out-generated>/<tsp_stem>.conversion.jsonl` (write; gitignored)

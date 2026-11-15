@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any, List
 
@@ -26,6 +27,10 @@ def main() -> int:
     p.add_argument("--ebusd-root", default="tools/ebus-profile-gen/ebusd-configuration")
     p.add_argument("--ebus-typespec-root", default="tools/ebus-profile-gen/ebus-typespec")
     p.add_argument("tsp_file", help="tsp path relative to ebusd-root or absolute")
+    p.add_argument(
+        "--zz",
+        help="explicit hexadecimal destination address ZZ (e.g. 52 or 08); default derived from tsp stem or comments",
+    )
     p.add_argument(
         "--key-prefix",
         help="key prefix for command keys (default: derived from tsp filename, e.g. 08.ehp.tsp → ehp_)",
@@ -118,10 +123,45 @@ def main() -> int:
     default_prefix = f"{tsp_stem.lower()}_" if tsp_stem else ""
     key_prefix = args.key_prefix if args.key_prefix is not None else default_prefix
 
+    # Derive default ZZ:
+    # 1. User --zz flag if provided
+    # 2. Leading 2-hex-digit byte from tsp stem (e.g. 52.mc2.mc.4 → 0x52, 08.ehp → 0x08)
+    # 3. Commented-out `// @zz(0x...)` in entry file
+    # 4. Fallback 0x08
+    default_zz: int = 0x08
+    if args.zz is not None:
+        try:
+            default_zz = int(args.zz, 16)
+        except ValueError:
+            print(f"error: invalid --zz value: {args.zz}", file=sys.stderr)
+            return 2
+        if not 0 <= default_zz <= 0xFF:
+            print(f"error: --zz must be a byte (00-ff): {args.zz}", file=sys.stderr)
+            return 2
+    else:
+        stem_m = re.match(r"^([0-9a-fA-F]{2})\.", tsp_stem)
+        if stem_m:
+            default_zz = int(stem_m.group(1), 16)
+        elif files:
+            # Check entry file for commented `// @zz(0x...)`
+            try:
+                with open(files[0], "r", encoding="utf-8") as f:
+                    content = f.read()
+                comm_m = re.search(r"//\s*@zz\(([^)]+)\)", content)
+                if comm_m:
+                    val_str = comm_m.group(1).strip()
+                    default_zz = int(val_str, 0)
+            except Exception:
+                pass
+
     # Convert to flat entries
     profiles_entries = mapper.profiles_to_flat_entries(fam, log=log)
     commands_entries = mapper.commands_to_flat_entries(
-        fam, key_prefix=key_prefix, aliases=raw.get("aliases", {}), log=log
+        fam,
+        key_prefix=key_prefix,
+        aliases=raw.get("aliases", {}),
+        log=log,
+        default_zz=default_zz,
     )
 
     # Emit raw generated output (gitignored)

@@ -904,6 +904,7 @@ def commands_to_flat_entries(
     key_prefix: str = "",
     aliases: Optional[Dict[str, str]] = None,
     log: Any = None,
+    default_zz: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Convert FamilyIR commands to config/simulation.json schema entries.
 
@@ -936,7 +937,9 @@ def commands_to_flat_entries(
         # The D tail comes from the parser-resolved read_tail/write_tail
         # (@base D bytes + inherited ancestors, never a fabricated 0x0d)
         # followed by the model's own @ext bytes.
-        zz = meta.get("zz", 0x08)  # Default ZZ
+        zz = meta.get("zz")
+        if zz is None:
+            zz = default_zz if default_zz is not None else 0x08
         mf = meta.get("mf", default_mf)  # Default MF (PB byte, e.g. 0xb5)
         pb = meta.get("pb", 0x09)  # Default SB
 
