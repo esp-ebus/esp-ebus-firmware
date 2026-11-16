@@ -82,10 +82,8 @@ class SystemMonitor {
   void processLogRequests();
   void processProtocolInfo();
 
-  void enqueueTelegram(ebus::ByteView master, ebus::ByteView slave,
-                       uint32_t session_id, uint16_t poll_id);
-  static void logRawTelegram(ebus::ByteView master, ebus::ByteView slave,
-                             uint32_t session_id, uint16_t poll_id);
+  void enqueueTelegram(const ebus::ProtocolInfo& info);
+  static void logRawTelegram(const ebus::ProtocolInfo& info);
 
   Status getStatus();
   void collectStatus();
