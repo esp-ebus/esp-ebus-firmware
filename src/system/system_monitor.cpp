@@ -26,16 +26,14 @@ constexpr size_t protocol_queue_size = 8;
 
 struct LogRequestItem {
   // key_id != 0: decoded command log request (existing path).
-  // key_id == 0: raw telegram — every correctly received message, logged
-  // as-is (master hex + optional slave hex), whether or not a configured
-  // command matches it.
+  // key_id == 0: raw protocol event, logged as-is (master hex + optional
+  // slave hex), whether or not it matches a configured command.
   uint8_t key_id = 0;
   // Per-side views (CRC/ACK excluded) peak at 21/17 bytes; model_capacity
   // (24) matches ErrorEntry/ProtocolEvent holding the same views.
   ebus::StaticSequence<ebus::detail::SequenceLimits::model_capacity> master;
   ebus::StaticSequence<ebus::detail::SequenceLimits::model_capacity> slave;
-  uint32_t session_id = 0;
-  uint16_t poll_id = 0;
+  ebus::ProtocolInfo info;
 };
 
 struct ProtocolInfoItem {
@@ -312,10 +310,10 @@ void SystemMonitor::processLogRequests() {
   LogRequestItem req;
   while (xQueueReceive(log_queue_, &req, 0) == pdTRUE) {
     if (req.key_id == 0) {
-      // Raw telegram: raw bytes only, no decoding or type tags.
-      logRawTelegram(ebus::ByteView(req.master.data(), req.master.size()),
-                     ebus::ByteView(req.slave.data(), req.slave.size()),
-                     req.session_id, req.poll_id);
+      req.info.master_view =
+          ebus::ByteView(req.master.data(), req.master.size());
+      req.info.slave_view = ebus::ByteView(req.slave.data(), req.slave.size());
+      logRawTelegram(req.info);
       continue;
     }
     std::string_view key = StringPool::instance().lookup(req.key_id);
@@ -346,42 +344,38 @@ void SystemMonitor::processProtocolInfo() {
       item.info.slave_view = ebus::ByteView(nullptr, 0);
     }
 
+    // Formatting happens in processLogRequests; this path stays a memcpy.
+    enqueueTelegram(item.info);
+
     if (item.info.is_error) {
       Mqtt::publishError(item.info);
     } else {
-      // Every correctly received message is queued for logging, whether
-      // or not a configured command matches it (unmatched telegrams
-      // previously vanished silently inside updateData). Formatting
-      // happens in processLogRequests; this path stays a memcpy.
-      enqueueTelegram(item.info.master_view, item.info.slave_view,
-                      item.info.session_id, item.info.poll_id);
       command_manager.updateData(item.info);
     }
   }
 }
 
-void SystemMonitor::enqueueTelegram(ebus::ByteView master, ebus::ByteView slave,
-                                    uint32_t session_id, uint16_t poll_id) {
+void SystemMonitor::enqueueTelegram(const ebus::ProtocolInfo& info) {
   if (log_queue_ == nullptr) return;
 
   LogRequestItem req{};
-  if (!master.empty()) req.master.assign(master.data(), master.size());
-  if (!slave.empty()) req.slave.assign(slave.data(), slave.size());
-  req.session_id = session_id;
-  req.poll_id = poll_id;
+  req.info = info;
+  if (!info.master_view.empty()) {
+    req.master.assign(info.master_view.data(), info.master_view.size());
+  }
+  if (!info.slave_view.empty()) {
+    req.slave.assign(info.slave_view.data(), info.slave_view.size());
+  }
   xQueueSend(log_queue_, &req, 0);
   if (task_handle_ != nullptr) {
     xTaskNotifyGive(task_handle_);
   }
 }
 
-// Raw telegram line in aligned format: master + optional slave.
-// The views already exclude CRC (master: header + NN + data, slave:
-// NN + data, no ACKs), so they log as-is — stripping here ate the last
-// data byte.
+// The views already exclude CRC/ACKs, so log their bytes as-is. Error
+// events also include the protocol error, result, and sequence state.
 // (Timestamp/level prefix is added by the logger itself.)
-void SystemMonitor::logRawTelegram(ebus::ByteView master, ebus::ByteView slave,
-                                   uint32_t session_id, uint16_t poll_id) {
+void SystemMonitor::logRawTelegram(const ebus::ProtocolInfo& info) {
   char buf[256];
   char* p = buf;
   const char* end_buf = buf + sizeof(buf);
@@ -395,19 +389,34 @@ void SystemMonitor::logRawTelegram(ebus::ByteView master, ebus::ByteView slave,
     }
   };
 
-  append_hex(master);
-  if (!slave.empty()) {
+  append_hex(info.master_view);
+  if (!info.slave_view.empty()) {
     if (p < end_buf - 3) {
       *p++ = ' ';
       *p++ = '/';
       *p++ = ' ';
     }
-    append_hex(slave);
+    append_hex(info.slave_view);
+  }
+
+  if (info.is_error) {
+    const size_t remaining = static_cast<size_t>(end_buf - p);
+    const int written =
+        std::snprintf(p, remaining, " [error: %s; result=%s; sequence=%s]",
+                      ebus::toString(info.protocol_error),
+                      ebus::toString(info.result),
+                      ebus::toString(info.sequence_state));
+    if (written > 0) {
+      const size_t available = remaining > 0 ? remaining - 1 : 0;
+      p += static_cast<size_t>(written) < available
+               ? static_cast<size_t>(written)
+               : available;
+    }
   }
 
   if (p > buf) {
     logger.debug(std::string_view(buf, static_cast<size_t>(p - buf)), false,
-                 session_id, poll_id);
+                 info.session_id, info.poll_id);
   }
 }
 
