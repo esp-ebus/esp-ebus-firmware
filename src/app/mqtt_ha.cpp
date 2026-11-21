@@ -19,7 +19,7 @@ inline constexpr size_t max_device_id_length = mqtt_ha_limits::max_device_id_len
 namespace mqtt_ha_buffer_limits {
 // Topic and ID limits
 inline constexpr size_t max_topic_length = 96;         // MQTT discovery topic (e.g., homeassistant/number/ebusXXXX/32_name/config)
-inline constexpr size_t max_state_topic_length = 128;  // State topic (e.g., ebusXXXX/values/<key>/<name>)
+inline constexpr size_t max_state_topic_length = 128;  // State topic (e.g., ebusXXXX/values/<key>_<name>)
 inline constexpr size_t max_object_id_length = 64;     // Sanitized object ID (e.g., 32_basement_temperature_nightroomsetpoint_value)
 inline constexpr size_t max_raw_object_id_length = 64; // Raw object ID before sanitization
 inline constexpr size_t max_uid_length = 48;           // Unique ID (e.g., ebusXXXX_32_0)
@@ -354,7 +354,7 @@ void MqttHA::publishComponent(const Command* command, size_t field_idx,
     }
 
     char state_topic_buf[mqtt_ha_buffer_limits::max_state_topic_length];
-    // State topic mirrors Mqtt::handleValueUpdate: values/<key>/<name> so
+    // State topic mirrors Mqtt::handleValueUpdate: values/<key>_<name> so
     // the topic is unique per (slave, file, id) — the same model name
     // (e.g. FlowTemp) resolves to different registers in different units.
     if (per_field) {
@@ -610,7 +610,7 @@ void MqttHA::createStateTopic(char* out, size_t out_size,
   for (size_t i = 0; i < tlen1 && (size_t)slen < out_size - 1; i++) {
     out[slen++] = lower_buf[i];
   }
-  if (!seg2.empty() && (size_t)slen < out_size - 1) out[slen++] = '/';
+  if (!seg2.empty() && (size_t)slen < out_size - 1) out[slen++] = '_';
   for (size_t i = 0; i < tlen2 && (size_t)slen < out_size - 1; i++) {
     out[slen++] = lower_buf[tlen1 + i];
   }

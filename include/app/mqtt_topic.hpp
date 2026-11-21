@@ -8,17 +8,24 @@
 // Returns the new length (may be larger than `len` due to inserted '_').
 // The buffer must have room for up to 2×len−1 bytes (worst case: every char
 // is uppercase). No null terminator is written — the caller owns that.
+// '/' characters are replaced with '_' so command keys containing slashes
+// do not create MQTT subtopics.
 //
 // Examples:
-//   CompStartsHwc  → comp_starts_hwc
-//   ABCDef          → abc_def
-//   already_snake   → already_snake  (no-op)
+//   CompStartsHwc        → comp_starts_hwc
+//   ABCDef               → abc_def
+//   already_snake        → already_snake  (no-op)
+//   heatpump/compressor  → heatpump_compressor
 inline size_t toSnakeCase(char* buf, size_t len) {
   char tmp[128];
   size_t j = 0;
   for (size_t i = 0; i < len && j < 127; ++i) {
     const unsigned char c = static_cast<unsigned char>(buf[i]);
-    if (std::isupper(c)) {
+    if (c == '/') {
+      // Replace path separator with underscore; collapse consecutive '/'
+      // or '/' immediately after '_' to avoid double underscores.
+      if (j > 0 && tmp[j - 1] != '_') tmp[j++] = '_';
+    } else if (std::isupper(c)) {
       const char prev = (i > 0) ? buf[i - 1] : '\0';
       const char next = (i + 1 < len) ? buf[i + 1] : '\0';
       const bool prevLower = std::islower(static_cast<unsigned char>(prev));

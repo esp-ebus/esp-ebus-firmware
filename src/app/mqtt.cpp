@@ -701,8 +701,7 @@ void Mqtt::handleWrite(std::string_view payload) {
 
   Command* command = command_manager.findCommand(key_view);
   if (command != nullptr) {
-    const bool fieldless_write =
-        !has_value && command->canWriteWithoutValue();
+    const bool fieldless_write = !has_value && command->canWriteWithoutValue();
     if (!has_value && !fieldless_write) {
       publishStream("response", 0, false,
                     [key_view](const ebus::JsonChunkVisitor& v) {
@@ -835,11 +834,13 @@ void Mqtt::handleValueUpdate(std::string_view key) {
     // name (e.g. FlowTemp) resolves to different physical registers in
     // different units (52.mc2.mc.4 vs 53.mc2.mc.5), so the name alone
     // would collide. The key is unique per (slave, file, id).
-    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s/%.*s",
+    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s_%.*s",
                      (int)key.size(), key.data(), (int)cmd->getName().size(),
                      cmd->getName().data());
     if (n <= 0 || (size_t)n >= sizeof(topic_buf)) return;
-    n = static_cast<int>(toSnakeCase(topic_buf, n));
+    static constexpr int values_pos = 7;  // strlen("values/")
+    n = values_pos +
+        static_cast<int>(toSnakeCase(topic_buf + values_pos, n - values_pos));
     topic_buf[n] = '\0';
 
     if (payload_mode_ == MqttPayloadMode::plain) {
@@ -866,11 +867,13 @@ void Mqtt::handleValueUpdate(std::string_view key) {
         const std::string_view bit_name = cmd->getFieldBitName(i, b);
         if (bit_name.empty()) continue;
         char topic_buf[128];
-        int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s/%.*s",
+        int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s_%.*s",
                          (int)key.size(), key.data(), (int)bit_name.size(),
                          bit_name.data());
         if (n <= 0 || (size_t)n >= sizeof(topic_buf)) continue;
-        n = static_cast<int>(toSnakeCase(topic_buf, n));
+        static constexpr int values_pos = 7;  // strlen("values/")
+        n = values_pos + static_cast<int>(toSnakeCase(topic_buf + values_pos,
+                                                      n - values_pos));
         topic_buf[n] = '\0';
         const uint32_t bit_val = byte_ok ? ((byte >> b) & 1u) : 0;
         if (payload_mode_ == MqttPayloadMode::plain) {
@@ -896,10 +899,12 @@ void Mqtt::handleValueUpdate(std::string_view key) {
     if (!field_name || !field_name[0]) field_name = "value";
 
     char topic_buf[128];
-    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s/%s",
+    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s_%s",
                      (int)key.size(), key.data(), field_name);
     if (n <= 0 || (size_t)n >= sizeof(topic_buf)) continue;
-    n = static_cast<int>(toSnakeCase(topic_buf, n));
+    static constexpr int values_pos = 7;  // strlen("values/")
+    n = values_pos +
+        static_cast<int>(toSnakeCase(topic_buf + values_pos, n - values_pos));
     topic_buf[n] = '\0';
 
     if (payload_mode_ == MqttPayloadMode::plain) {
