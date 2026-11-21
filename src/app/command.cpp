@@ -25,10 +25,26 @@ command_types::WriteType parseWriteType(std::string_view name) {
   return command_types::WriteType::invalid;
 }
 
-// Wire filler fields (`ign` / `ign_N`) are not client input:
-// multi-field writes auto-pad them with 0 so byte positions stay right.
+// Wire filler fields are not client input: multi-field writes auto-pad
+// them with 0 so byte positions stay right. Bare fillers are `ign` /
+// `ign_N`; composite expansion prefixes the parent name, so `value_ign`
+// and `value_ign_1` (from `@maxLength(1) ign: IGN;` inside a plain model)
+// must be recognized too.
 bool isIgnFieldName(std::string_view name) {
-  return name == "ign" || name.rfind("ign_", 0) == 0;
+  if (name == "ign" || name.rfind("ign_", 0) == 0) return true;
+  std::string_view base = name;
+  const size_t last = base.rfind('_');
+  if (last != std::string_view::npos && last + 1 < base.size()) {
+    bool trailing_number = true;
+    for (size_t i = last + 1; i < base.size(); ++i) {
+      if (base[i] < '0' || base[i] > '9') {
+        trailing_number = false;
+        break;
+      }
+    }
+    if (trailing_number) base = base.substr(0, last);
+  }
+  return base.size() >= 4 && base.compare(base.size() - 4, 4, "_ign") == 0;
 }
 
 // Parses a `bits` map object (reader positioned at object_start). On

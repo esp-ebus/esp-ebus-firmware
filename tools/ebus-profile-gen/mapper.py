@@ -524,16 +524,17 @@ def _strip_qualified(ebus_type: str) -> str:
 def _map_type(ebus_type: str, max_length: Optional[int] = None) -> str:
     """Map an eBUS TypeSpec type to our datatype string.
 
-    For STR/HEX types the @maxLength decorator selects the exact CHAR/HEX
-    width (e.g. STR + maxLength(21) → CHAR21). The protocol allows at most
-    16 data bytes (spec 5.6, max_data_bytes) and the ebus-library implements
+    For STR/HEX/IGN types the @maxLength decorator selects the exact
+    CHAR/HEX width (e.g. STR + maxLength(21) → CHAR21, IGN +
+    maxLength(7) → CHAR7). The protocol allows at most 16 data bytes
+    (spec 5.6, max_data_bytes) and the ebus-library implements
     CHAR1-16 / HEX1-16; wider types are flagged as unsupported by the caller.
     """
     t = _strip_qualified(ebus_type)
     mapped = TYPE_MAP.get(t)
     if mapped:
-        if t in ("STR", "HEX") and max_length:
-            base = "CHAR" if t == "STR" else "HEX"
+        if t in ("STR", "HEX", "IGN") and max_length:
+            base = "HEX" if t == "HEX" else "CHAR"
             return f"{base}{max_length}"
         return mapped
     # Try scalar type map (for named scalars like tempsensor, cntstarts, etc.)
@@ -1293,9 +1294,11 @@ def build_profiles_and_commands(
             )
         return t, meta
 
-    def _lookup_model(type_name: str, namespace: Optional[str] = None) -> Dict[str, Any]:
+    def _lookup_model(
+        type_name: str, namespace: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Look up a model by name, preferring namespace-qualified keys.
-        
+
         With the fix for namespace collisions, models are stored with qualified
         keys like "Ochsner.command" or "Tem.command". This helper tries to find
         the most appropriate model by:
@@ -1309,7 +1312,7 @@ def build_profiles_and_commands(
             qualified_key = f"{namespace}.{type_name}"
             if qualified_key in models:
                 return models[qualified_key]
-            
+
             # Try namespace prefixes (e.g., "Ochsner._22102" -> try "Ochsner")
             # This handles the case where a model is defined in a parent namespace
             # but referenced from a child namespace
@@ -1319,7 +1322,7 @@ def build_profiles_and_commands(
                 qualified_key = f"{parent_ns}.{type_name}"
                 if qualified_key in models:
                     return models[qualified_key]
-        
+
         # Fall back to unqualified name (for models without namespace or
         # backward compatibility)
         if type_name in models:
@@ -1327,8 +1330,11 @@ def build_profiles_and_commands(
         return {}
 
     def expand_composite_field(
-        parent_name: str, type_name: str, path: List[str], depth: int,
-        namespace: Optional[str] = None
+        parent_name: str,
+        type_name: str,
+        path: List[str],
+        depth: int,
+        namespace: Optional[str] = None,
     ) -> List[FieldIR]:
         """Expand a composite (plain-model) field into leaf FieldIRs.
 
@@ -1353,11 +1359,17 @@ def build_profiles_and_commands(
         for child in model.get("fields", []):
             child_name = str(child.get("name", ""))
             child_type = _strip_qualified(str(child.get("type", "")))
-            if _lookup_model(child_type, model_namespace) and child_type not in TYPE_MAP:
+            if (
+                _lookup_model(child_type, model_namespace)
+                and child_type not in TYPE_MAP
+            ):
                 leaves.extend(
                     expand_composite_field(
-                        parent_name, child_type, path + [child_name], depth + 1,
-                        model_namespace
+                        parent_name,
+                        child_type,
+                        path + [child_name],
+                        depth + 1,
+                        model_namespace,
                     )
                 )
                 continue

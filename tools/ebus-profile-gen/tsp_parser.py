@@ -38,6 +38,10 @@ _DECORATOR_RE = re.compile(r"^\s*@(\w+)(?:\(([^)]*)\))?\s*$")
 # may share one physical line (e.g. @minValue(0) @maxValue(32) @step(0.5))
 _DECORATOR_ANY_RE = re.compile(r"@(\w+)(?:\(([^)]*)\))?")
 
+# Matches a decorator at the start of a line, without requiring the line to
+# end after it — for lines where the decorator shares the line with its field
+_LEADING_DEC_RE = re.compile(r"^\s*@(\w+)(?:\(([^)]*)\))?")
+
 # Matches an alias: alias Name = value;
 _ALIAS_RE = re.compile(r"^\s*alias\s+(\w+)\s*=\s*(.+?)\s*;?\s*$")
 
@@ -62,9 +66,7 @@ _MODEL_GENERIC_OPEN_RE = re.compile(r"^\s*model\s+(\w+)\s*<([^>]*)>\s*\{\s*$")
 _MODEL_OPEN_RE = re.compile(r"^\s*model\s+(\w+)\s*\{\s*$")
 
 # Matches a model template: model Name is Template<Type>;
-_MODEL_TEMPLATE_RE = re.compile(
-    r"^\s*model\s+(\w+)\s+is\s+(\w+)<([\w.]+)>\s*;?\s*$"
-)
+_MODEL_TEMPLATE_RE = re.compile(r"^\s*model\s+(\w+)\s+is\s+(\w+)<([\w.]+)>\s*;?\s*$")
 
 # Matches a field: fieldName: Type;
 _FIELD_RE = re.compile(r"^\s*(\w+)\s*:\s*([\w.]+)\s*;?\s*$")
@@ -128,7 +130,7 @@ def _strip_comments(lines: List[str]) -> SourceLines:
             end = line.find("*/")
             if end != -1:
                 in_block = False
-                line = line[end + 2:]
+                line = line[end + 2 :]
             else:
                 continue
         idx = line.find("//")
@@ -138,7 +140,7 @@ def _strip_comments(lines: List[str]) -> SourceLines:
             start = line.find("/**")
             end = line.find("*/", start)
             if end != -1:
-                line = line[:start] + line[end + 2:]
+                line = line[:start] + line[end + 2 :]
             else:
                 in_block = True
                 line = line[:start]
@@ -221,13 +223,13 @@ def _split_template_params(params_str: str) -> List[str]:
             current += char
             in_quote = True
             quote_char = char
-        elif char == '<':
+        elif char == "<":
             depth += 1
             current += char
-        elif char == '>':
+        elif char == ">":
             depth -= 1
             current += char
-        elif char == ',' and depth == 0 and not in_quote:
+        elif char == "," and depth == 0 and not in_quote:
             parts.append(current)
             current = ""
         else:
@@ -267,17 +269,17 @@ def _parse_template_params(params_str: str) -> List[Dict[str, str]]:
         # Parse extends clause with optional default
         # Pattern: Name extends Type [= default]
         # Use non-greedy match to handle spaces in extends type
-        extends_match = re.match(r'^(\w+)\s+extends\s+([^=]+?)(?:\s*=\s*(.*))?$', part)
+        extends_match = re.match(r"^(\w+)\s+extends\s+([^=]+?)(?:\s*=\s*(.*))?$", part)
         if extends_match:
             param["name"] = extends_match.group(1)
             param["extends"] = extends_match.group(2)
             if extends_match.group(3):
-                param["default"] = extends_match.group(3).strip().strip('"\'')
+                param["default"] = extends_match.group(3).strip().strip("\"'")
         # Parse simple default (without extends)
-        elif '=' in part:
-            name_part, default_part = part.split('=', 1)
+        elif "=" in part:
+            name_part, default_part = part.split("=", 1)
             param["name"] = name_part.strip()
-            param["default"] = default_part.strip().strip('"\'')
+            param["default"] = default_part.strip().strip("\"'")
 
         params.append(param)
     return params
@@ -346,6 +348,28 @@ def _parse_decorator_args(args_str: Optional[str]) -> List[str]:
     if current.strip():
         args.append(current.strip())
     return args
+
+
+def _split_leading_decorators(line: str) -> Tuple[List[Dict[str, Any]], str]:
+    """Split leading ``@name(args)`` tokens off a source line.
+
+    Handles the ebusd-configuration style where a field shares its line
+    with its decorators (``@maxLength(1) ign: IGN;``, possibly several
+    decorators). Returns the decorator list and the line remainder; a
+    decorator-only line yields an empty remainder so callers can fall
+    back to the full-line decorator handling.
+    """
+    decorators: List[Dict[str, Any]] = []
+    rest = line
+    while True:
+        m = _LEADING_DEC_RE.match(rest)
+        if not m:
+            break
+        decorators.append(
+            {"name": m.group(1), "args": _parse_decorator_args(m.group(2))}
+        )
+        rest = rest[m.end() :]
+    return decorators, rest
 
 
 def _resolve_constant(name: str, aliases: Dict[str, str]) -> Optional[int]:
@@ -451,16 +475,12 @@ class TspParser:
             if len(matches) == 1:
                 return ir["registers"][matches[0]]
             ns = child.get("namespace", "")
-            same_ns = [
-                i for i in matches
-                if ir["registers"][i].get("namespace") == ns
-            ]
+            same_ns = [i for i in matches if ir["registers"][i].get("namespace") == ns]
             pool = same_ns or matches
             if len(pool) == 1:
                 return ir["registers"][pool[0]]
             same_file = [
-                i for i in pool
-                if ir["registers"][i].get("file") == child.get("file")
+                i for i in pool if ir["registers"][i].get("file") == child.get("file")
             ]
             if same_file:
                 return ir["registers"][same_file[0]]
@@ -531,13 +551,9 @@ class TspParser:
                             changed = True
                     # Read side: fold the parent's own @ext into the tail.
                     if "read_tail" in pmeta:
-                        cand = list(pmeta["read_tail"]) + list(
-                            pmeta.get("ext") or []
-                        )
+                        cand = list(pmeta["read_tail"]) + list(pmeta.get("ext") or [])
                         prio = pmeta.get("read_prio", 0)
-                        if "read_tail" not in meta or prio < meta.get(
-                            "read_prio", 99
-                        ):
+                        if "read_tail" not in meta or prio < meta.get("read_prio", 99):
                             meta["read_tail"] = cand
                             meta["read_prio"] = prio
                             if "read_pb" in pmeta:
@@ -559,9 +575,7 @@ class TspParser:
                 meta["write_tail"] = []
             if "read_tail" not in meta and "write_tail" not in meta:
                 reg["unsupported"] = True
-                reg["unsupported_reason"] = (
-                    "no read/write id resolved from @inherit"
-                )
+                reg["unsupported_reason"] = "no read/write id resolved from @inherit"
 
         return ir
 
@@ -611,7 +625,10 @@ class TspParser:
                     found = False
                     for dm in _DECORATOR_ANY_RE.finditer(lines[i]):
                         decorators.append(
-                            {"name": dm.group(1), "args": _parse_decorator_args(dm.group(2))}
+                            {
+                                "name": dm.group(1),
+                                "args": _parse_decorator_args(dm.group(2)),
+                            }
                         )
                         found = True
                     if not found:
@@ -670,7 +687,9 @@ class TspParser:
                         namespace=namespace,
                     )
                     reg["register"]["template_type"] = type_param
-                    reg["register"]["template_params"] = _parse_template_params(type_param)
+                    reg["register"]["template_params"] = _parse_template_params(
+                        type_param
+                    )
                     i = reg["next_i"]
                     ir["registers"].append(reg["register"])
                     continue
@@ -715,7 +734,9 @@ class TspParser:
                         namespace=namespace,
                     )
                     reg["register"]["template_type"] = type_param
-                    reg["register"]["template_params"] = _parse_template_params(type_param)
+                    reg["register"]["template_params"] = _parse_template_params(
+                        type_param
+                    )
                     i = reg["next_i"]
                     ir["registers"].append(reg["register"])
                     continue
@@ -735,16 +756,16 @@ class TspParser:
                         model_line=lineno,
                         namespace=namespace,
                     )
-                    reg['template'] = template_name
-                    reg['template_type'] = type_param
-                    reg['template_params'] = _parse_template_params(type_param)
+                    reg["template"] = template_name
+                    reg["template_type"] = type_param
+                    reg["template_params"] = _parse_template_params(type_param)
                     # Flatten `is Template<T>` into an @inherit parent so
                     # the template's resolved id/wid tails propagate.
-                    reg['inherit'] = list(reg.get('inherit') or []) + [
-                        template_name
-                    ]
-                    reg['fields'] = self._template_fields(template_name, type_param, ir, aliases)
-                    ir['registers'].append(reg)
+                    reg["inherit"] = list(reg.get("inherit") or []) + [template_name]
+                    reg["fields"] = self._template_fields(
+                        template_name, type_param, ir, aliases
+                    )
+                    ir["registers"].append(reg)
                     i += 1
                     continue
 
@@ -752,7 +773,13 @@ class TspParser:
                 sm = _SCALAR_RE.match(next_line)
                 if sm:
                     scalar = self._build_scalar(
-                        sm.group(1), sm.group(2), decorators, ir, fpath, lineno, namespace
+                        sm.group(1),
+                        sm.group(2),
+                        decorators,
+                        ir,
+                        fpath,
+                        lineno,
+                        namespace,
                     )
                     if sm.group(1) not in ir["scalars"]:
                         ir["scalars"][sm.group(1)] = scalar
@@ -809,7 +836,9 @@ class TspParser:
             mm = _MODEL_RE.match(line)
             if mm:
                 model_name = mm.group(1)
-                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                qualified_name = (
+                    f"{namespace}.{model_name}" if namespace else model_name
+                )
                 ir["models"][qualified_name] = {
                     "name": model_name,
                     "qualified_name": qualified_name,
@@ -824,7 +853,9 @@ class TspParser:
             mg = _MODEL_GENERIC_RE.match(line)
             if mg:
                 model_name = mg.group(1)
-                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                qualified_name = (
+                    f"{namespace}.{model_name}" if namespace else model_name
+                )
                 ir["models"][qualified_name] = {
                     "name": model_name,
                     "qualified_name": qualified_name,
@@ -840,7 +871,9 @@ class TspParser:
             mo = _MODEL_OPEN_RE.match(line)
             if mo:
                 model_name = mo.group(1)
-                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                qualified_name = (
+                    f"{namespace}.{model_name}" if namespace else model_name
+                )
                 fields, next_i = self._parse_plain_model_body(lines, i + 1)
                 ir["models"][qualified_name] = {
                     "name": model_name,
@@ -856,7 +889,9 @@ class TspParser:
             mgo = _MODEL_GENERIC_OPEN_RE.match(line)
             if mgo:
                 model_name = mgo.group(1)
-                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                qualified_name = (
+                    f"{namespace}.{model_name}" if namespace else model_name
+                )
                 fields, next_i = self._parse_plain_model_body(lines, i + 1)
                 ir["models"][qualified_name] = {
                     "name": model_name,
@@ -873,7 +908,9 @@ class TspParser:
             mt = _MODEL_TEMPLATE_RE.match(line)
             if mt:
                 model_name = mt.group(1)
-                qualified_name = f"{namespace}.{model_name}" if namespace else model_name
+                qualified_name = (
+                    f"{namespace}.{model_name}" if namespace else model_name
+                )
                 ir["models"][qualified_name] = {
                     "name": model_name,
                     "qualified_name": qualified_name,
@@ -897,6 +934,9 @@ class TspParser:
             token = token.strip()
             if not token:
                 continue
+            if token.startswith("@"):
+                _, token = _split_leading_decorators(token)
+                token = token.strip()
             fm = _FIELD_RE.match(token)
             if fm:
                 fields.append({"name": fm.group(1), "type": fm.group(2)})
@@ -911,7 +951,12 @@ class TspParser:
         i = start_i
         while i < len(lines):
             line = lines[i]
-            fm = _FIELD_RE.match(line)
+            # A field may share its line with its decorators
+            # (`@maxLength(1) ign: IGN;`); strip them before matching.
+            field_line = line
+            if line.lstrip().startswith("@"):
+                _, field_line = _split_leading_decorators(line)
+            fm = _FIELD_RE.match(field_line)
             if fm:
                 fields.append({"name": fm.group(1), "type": fm.group(2)})
                 i += 1
@@ -920,7 +965,10 @@ class TspParser:
                 return fields, i + 1
             close_at = line.find("}")
             if close_at >= 0:
-                fm = _FIELD_RE.match(line[:close_at].strip())
+                head = line[:close_at]
+                if head.lstrip().startswith("@"):
+                    _, head = _split_leading_decorators(head)
+                fm = _FIELD_RE.match(head.strip())
                 if fm:
                     fields.append({"name": fm.group(1), "type": fm.group(2)})
                 return fields, i + 1
@@ -952,6 +1000,9 @@ class TspParser:
                 token = token.strip()
                 if not token:
                     continue
+                if token.startswith("@"):
+                    _, token = _split_leading_decorators(token)
+                    token = token.strip()
                 fm = _FIELD_RE.match(token)
                 if fm:
                     field_name = fm.group(1)
@@ -991,6 +1042,26 @@ class TspParser:
                 i += 1
                 break
 
+            # Decorator(s) + field on one line: `@maxLength(1) ign: IGN;`
+            if line.lstrip().startswith("@"):
+                same_line_decorators, rest = _split_leading_decorators(line)
+                fm = _FIELD_RE.match(rest) if rest.strip() else None
+                if fm:
+                    fields.append(
+                        self._build_field(
+                            fm.group(1),
+                            fm.group(2),
+                            same_line_decorators,
+                            ir,
+                            fpath,
+                            model=model_name,
+                            namespace=namespace,
+                            line_no=lineno,
+                        )
+                    )
+                    i += 1
+                    continue
+
             # Decorator before a field
             dm = _DECORATOR_RE.match(line)
             if dm:
@@ -1006,13 +1077,19 @@ class TspParser:
 
                 if i < len(lines):
                     fm = _FIELD_RE.match(lines[i])
+                    trailing_decorators: List[Dict[str, Any]] = []
+                    if fm is None and lines[i].lstrip().startswith("@"):
+                        # The field line itself starts with another
+                        # decorator: `@out` NL `@maxLength(1) ign: IGN;`
+                        trailing_decorators, rest = _split_leading_decorators(lines[i])
+                        fm = _FIELD_RE.match(rest) if rest.strip() else None
                     if fm:
                         field_name = fm.group(1)
                         field_type = fm.group(2)
                         field = self._build_field(
                             field_name,
                             field_type,
-                            field_decorators,
+                            field_decorators + trailing_decorators,
                             ir,
                             fpath,
                             model=model_name,
@@ -1085,9 +1162,7 @@ class TspParser:
                 reg["template_params"] = _parse_template_params(type_param)
                 # Flatten `is Template<T>` into an @inherit parent so the
                 # template's resolved id/wid tails propagate.
-                reg["inherit"] = list(reg.get("inherit") or []) + [
-                    template_name
-                ]
+                reg["inherit"] = list(reg.get("inherit") or []) + [template_name]
                 reg["fields"] = self._template_fields(
                     template_name, type_param, ir, aliases
                 )
@@ -1233,7 +1308,9 @@ class TspParser:
 
         field["our_datatype"] = self._map_type(ebus_type)
         field["signed"] = ebus_type.startswith(("S", "s"))
-        field["big_endian"] = "R" in ebus_type or ("B" in ebus_type and "L" not in ebus_type)
+        field["big_endian"] = "R" in ebus_type or (
+            "B" in ebus_type and "L" not in ebus_type
+        )
 
         self.log.debug(
             "parse",
@@ -1452,7 +1529,7 @@ class TspParser:
         aliases: Dict[str, str],
     ) -> List[Dict[str, Any]]:
         """Build field list for a template model.
-        
+
         For known templates (in _SINGLE_FIELD_TEMPLATES, _TWO_FIELD_TEMPLATES),
         uses hardcoded field definitions for backward compatibility.
         For other templates, looks up the template definition in ir['registers']
@@ -1526,49 +1603,55 @@ class TspParser:
                 if reg.get("name") == template_name and reg.get("template_type"):
                     template_def = reg
                     break
-            
+
             if template_def:
                 # Generic template expansion: copy all fields from template
                 # and substitute template parameters with actual values from instantiation
-                
+
                 # Get template's full parameter list
                 template_params = template_def.get("template_params", [])
                 # Get instantiation's parameter list
                 inst_params = _parse_template_params(type_param)
-                
+
                 # Build a complete parameter mapping: template param name -> actual value
                 # Fill in missing parameters with their defaults
                 param_values = {}
                 for i, inst_param in enumerate(inst_params):
                     if i < len(template_params):
-                        param_values[template_params[i].get("name")] = inst_param.get("name")
+                        param_values[template_params[i].get("name")] = inst_param.get(
+                            "name"
+                        )
                 # Fill in defaults for missing parameters
                 for tpl_param in template_params:
                     if tpl_param.get("name") not in param_values:
-                        param_values[tpl_param.get("name")] = tpl_param.get("default", "")
-                
+                        param_values[tpl_param.get("name")] = tpl_param.get(
+                            "default", ""
+                        )
+
                 # Copy all fields from template with substitutions
                 for field in template_def.get("fields", []):
                     new_field = dict(field)
-                    
+
                     # Substitute template parameter in ebus_type
                     field_type = new_field.get("ebus_type", "")
                     if field_type in param_values:
                         new_field["ebus_type"] = param_values[field_type]
-                        new_field["our_datatype"] = self._map_type(new_field["ebus_type"])
-                    
+                        new_field["our_datatype"] = self._map_type(
+                            new_field["ebus_type"]
+                        )
+
                     # Substitute const_value references in meta
                     meta = new_field.get("meta", {})
                     if "const_value" in meta:
                         const_val = meta["const_value"]
                         if const_val in param_values:
                             meta["const_value"] = param_values[const_val]
-                    
+
                     # Remove file/source info from template definition
                     new_field.pop("file", None)
                     new_field.pop("line", None)
                     new_field["file"] = "template"
-                    
+
                     fields.append(new_field)
             else:
                 # Unknown template: assume single value field
@@ -1602,43 +1685,91 @@ class TspParser:
 
         type_map = {
             # 1 byte
-            "BI0": "UINT8", "BI1": "UINT8", "BI2": "UINT8", "BI3": "UINT8",
-            "BI4": "UINT8", "BI5": "UINT8", "BI6": "UINT8", "BI7": "UINT8",
-            "BI0_6": "UINT8", "BI0_7": "UINT8",
-            "UCH": "UINT8", "U1L": "UINT8",
-            "SCH": "INT8", "D1B": "DATA1B", "S1L": "INT8",
-            "BCD": "BCD8", "HCD": "UINT8",
+            "BI0": "UINT8",
+            "BI1": "UINT8",
+            "BI2": "UINT8",
+            "BI3": "UINT8",
+            "BI4": "UINT8",
+            "BI5": "UINT8",
+            "BI6": "UINT8",
+            "BI7": "UINT8",
+            "BI0_6": "UINT8",
+            "BI0_7": "UINT8",
+            "UCH": "UINT8",
+            "U1L": "UINT8",
+            "SCH": "INT8",
+            "D1B": "DATA1B",
+            "S1L": "INT8",
+            "BCD": "BCD8",
+            "HCD": "UINT8",
             "D1C": "DATA1C",
             # 2 byte
-            "PIN": "PIN2", "UIN": "UINT16", "UIR": "UINT16R",
-            "U2L": "UINT16", "U2B": "UINT16R",
-            "SIN": "INT16", "SIR": "INT16R",
-            "S2L": "INT16", "S2B": "INT16R",
-            "BCD2": "BCD16", "HCD2": "HEX2",
-            "D2B": "DATA2B", "D2C": "DATA2C",
-            "FLT": "INT16", "FLR": "INT16R",
+            "PIN": "PIN2",
+            "UIN": "UINT16",
+            "UIR": "UINT16R",
+            "U2L": "UINT16",
+            "U2B": "UINT16R",
+            "SIN": "INT16",
+            "SIR": "INT16R",
+            "S2L": "INT16",
+            "S2B": "INT16R",
+            "BCD2": "BCD16",
+            "HCD2": "HEX2",
+            "D2B": "DATA2B",
+            "D2C": "DATA2C",
+            "FLT": "INT16",
+            "FLR": "INT16R",
             # 3 byte
-            "BCD3": "BCD24", "HCD3": "HEX3",
-            "U3N": "UINT24", "U3R": "UINT24R", "U3L": "HEX3", "U3B": "HEX3",
-            "S3N": "INT24", "S3R": "INT24R", "S3L": "HEX3", "S3B": "HEX3",
+            "BCD3": "BCD24",
+            "HCD3": "HEX3",
+            "U3N": "UINT24",
+            "U3R": "UINT24R",
+            "U3L": "HEX3",
+            "U3B": "HEX3",
+            "S3N": "INT24",
+            "S3R": "INT24R",
+            "S3L": "HEX3",
+            "S3B": "HEX3",
             # 4 byte
-            "ULG": "UINT32", "ULR": "UINT32R", "U4L": "UINT32", "U4B": "UINT32R",
-            "SLG": "INT32", "SLR": "INT32R", "S4L": "INT32", "S4B": "INT32R",
-            "BCD4": "BCD32", "HCD4": "HEX4",
-            "EXP": "FLOAT32", "EXR": "FLOAT32R",
+            "ULG": "UINT32",
+            "ULR": "UINT32R",
+            "U4L": "UINT32",
+            "U4B": "UINT32R",
+            "SLG": "INT32",
+            "SLR": "INT32R",
+            "S4L": "INT32",
+            "S4B": "INT32R",
+            "BCD4": "BCD32",
+            "HCD4": "HEX4",
+            "EXP": "FLOAT32",
+            "EXR": "FLOAT32R",
             # Date/time (mirror of mapper.py TYPE_MAP)
-            "BTI": "TIME_BCD3R", "VTI": "TIME_BIN3R", "VTM": "TIME_BIN2R",
-            "MIN": "TIME_MIN2", "TTM": "TIME_TRUNC10",
-            "TTH": "TIME_TRUNC30", "TTQ": "TIME_TRUNC15",
-            "HTI": "TIME_BIN3", "BTM": "TIME_BCD2R", "HTM": "TIME_BIN2",
-            "BDA": "DATE_BCD4", "HDA": "DATE_BIN4",
-            "BDA3": "DATE_BCD3", "HDA3": "DATE_BIN3",
-            "BDZ": "DATE_BCD4Z", "DAY": "DATE_DAY2",
+            "BTI": "TIME_BCD3R",
+            "VTI": "TIME_BIN3R",
+            "VTM": "TIME_BIN2R",
+            "MIN": "TIME_MIN2",
+            "TTM": "TIME_TRUNC10",
+            "TTH": "TIME_TRUNC30",
+            "TTQ": "TIME_TRUNC15",
+            "HTI": "TIME_BIN3",
+            "BTM": "TIME_BCD2R",
+            "HTM": "TIME_BIN2",
+            "BDA": "DATE_BCD4",
+            "HDA": "DATE_BIN4",
+            "BDA3": "DATE_BCD3",
+            "HDA3": "DATE_BIN3",
+            "BDZ": "DATE_BCD4Z",
+            "DAY": "DATE_DAY2",
             "DTM": "DATETIME_MIN4",
-            "BDY": "UINT8", "HDY": "UINT8",
+            "BDY": "UINT8",
+            "HDY": "UINT8",
             # String
-            "STR": "CHAR1", "NTS": "CHAR1", "IGN": "CHAR1", "HEX": "HEX1",
+            "STR": "CHAR1",
+            "NTS": "CHAR1",
+            "IGN": "CHAR1",
+            "HEX": "HEX1",
             # Boolean
-            "boolean": "UINT8", "BOOL": "UINT8",
+            "boolean": "UINT8",
+            "BOOL": "UINT8",
         }
         return type_map.get(t, t.upper() if t else "")

@@ -39,9 +39,10 @@ an error / drops the message; the telegram is never partially sent):
 - **Duplicate keys reject.**
 - **Scalar on a multi-field command rejects** — it would encode only the
   first field and truncate the wire payload.
-- **`ign` / `ign_*` filler fields are never client input**: omitted keys
-  with those names are auto-padded with `0x00` of the profile datatype's
-  width. Explicit values for them are accepted and used as-is.
+- **`ign` / `ign_*` filler fields are never client input** (composite
+  expansion prefixes the parent name: `value_ign`, `value_ign_1`):
+  omitted keys with those names are auto-padded with `0x00` of the profile
+  datatype's width. Explicit values for them are accepted and used as-is.
 - **Ranges**: the encoded number must fall inside the field's
   `min`/`max` (profile defaults, per-field overrides in the command).
   A `max` of `0` means *no upper bound* (profiles whose TypeSpec

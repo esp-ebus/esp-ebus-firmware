@@ -12,6 +12,7 @@ profiles. Run from the repo root:
 
     python3 tools/ebus-profile-gen/test_golden_ids.py
 """
+
 from __future__ import annotations
 
 import os
@@ -30,7 +31,9 @@ from model import CommandIR, FamilyIR, FieldIR  # noqa: E402
 _REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-_EBUSD_ROOT = os.path.join(_REPO_ROOT, "tools", "ebus-profile-gen", "ebusd-configuration")
+_EBUSD_ROOT = os.path.join(
+    _REPO_ROOT, "tools", "ebus-profile-gen", "ebusd-configuration"
+)
 _TYPESPEC_ROOT = os.path.join(_REPO_ROOT, "tools", "ebus-profile-gen", "ebus-typespec")
 
 _failures: List[str] = []
@@ -120,19 +123,15 @@ def expect(
         return (e.get("wpbsb") or "") + (e.get("wdx") or "")
 
     try:
-        assert entries, (
-            f"{name}: command missing (present: {sorted(by_name)})"
-        )
+        assert entries, f"{name}: command missing (present: {sorted(by_name)})"
         if wid_hex is None:
-            assert all(
-                _read_id(e) == id_hex and not _write_id(e) for e in entries
-            ), f"{name}: expected id={id_hex!r} read-only, got " + str(
-                [(_read_id(e), _write_id(e)) for e in entries]
+            assert all(_read_id(e) == id_hex and not _write_id(e) for e in entries), (
+                f"{name}: expected id={id_hex!r} read-only, got "
+                + str([(_read_id(e), _write_id(e)) for e in entries])
             )
         else:
             assert all(
-                _read_id(e) == id_hex and _write_id(e) == wid_hex
-                for e in entries
+                _read_id(e) == id_hex and _write_id(e) == wid_hex for e in entries
             ), f"{name}: expected id={id_hex!r} wid={wid_hex!r}, got " + str(
                 [(_read_id(e), _write_id(e)) for e in entries]
             )
@@ -154,17 +153,13 @@ def expect_absent(
         _failures.append(str(exc))
 
 
-def expect_zz(
-    by_name: Dict[str, List[Dict[str, Any]]], name: str, zz_hex: str
-) -> None:
+def expect_zz(by_name: Dict[str, List[Dict[str, Any]]], name: str, zz_hex: str) -> None:
     """Assert the destination byte for a command (archived ZZ column)."""
     global _checks
     _checks += 1
     entries = by_name.get(name)
     try:
-        assert entries, (
-            f"{name}: command missing (present: {sorted(by_name)})"
-        )
+        assert entries, f"{name}: command missing (present: {sorted(by_name)})"
         assert all(e.get("zz") == zz_hex for e in entries), (
             f"{name}: expected zz={zz_hex!r}, got "
             + str([e.get("zz") for e in entries])
@@ -185,9 +180,7 @@ def expect_positions(
     _checks += 1
     entries = by_name.get(name)
     try:
-        assert entries, (
-            f"{name}: command missing (present: {sorted(by_name)})"
-        )
+        assert entries, f"{name}: command missing (present: {sorted(by_name)})"
         for e in entries:
             got = [f["position"] for f in e["fields"]]
             assert got == positions, (
@@ -205,9 +198,7 @@ def expect_fields(
     _checks += 1
     entries = by_name.get(name)
     try:
-        assert entries, (
-            f"{name}: command missing (present: {sorted(by_name)})"
-        )
+        assert entries, f"{name}: command missing (present: {sorted(by_name)})"
         for e in entries:
             got = [f["name"] for f in e["fields"]]
             assert got == field_names, (
@@ -228,22 +219,14 @@ def expect_bits(
     _checks += 1
     entries = by_name.get(name)
     try:
-        assert entries, (
-            f"{name}: command missing (present: {sorted(by_name)})"
-        )
+        assert entries, f"{name}: command missing (present: {sorted(by_name)})"
         for e in entries:
-            got = {
-                f["name"]: f.get("bits")
-                for f in e["fields"]
-                if "bits" in f
-            }
+            got = {f["name"]: f.get("bits") for f in e["fields"] if "bits" in f}
             assert got.get(field_name) == bits, (
                 f"{name}: expected bits[{field_name!r}]={bits}, "
                 f"got {got.get(field_name)}"
             )
-            bits_field = next(
-                (f for f in e["fields"] if f["name"] == field_name), None
-            )
+            bits_field = next((f for f in e["fields"] if f["name"] == field_name), None)
             assert bits_field is not None and (
                 bits_field.get("ha_profile") == "binary_sensor"
             ), (
@@ -269,7 +252,8 @@ def expect_profile_metadata(
     try:
         command = next(c for c in commands if c["name"] == command_name)
         fields = [
-            f for f in command["fields"]
+            f
+            for f in command["fields"]
             if field_name is None or f["name"] == field_name
         ]
         assert len(fields) == 1, (
@@ -281,9 +265,7 @@ def expect_profile_metadata(
                 f"{command_name}: expected field {key}={value!r}, "
                 f"got {field.get(key)!r}"
             )
-        profile = next(
-            (p for p in profiles if p["name"] == field["profile"]), None
-        )
+        profile = next((p for p in profiles if p["name"] == field["profile"]), None)
         assert profile is not None, (
             f"{command_name}: profile {field['profile']!r} was not emitted"
         )
@@ -332,9 +314,7 @@ def expect_unit_profile_mappings() -> None:
                 ),
                 CommandIR(
                     name="UnsignedTemperature",
-                    fields=[
-                        FieldIR(name="value", ebus_type="UINT16", unit="°C")
-                    ],
+                    fields=[FieldIR(name="value", ebus_type="UINT16", unit="°C")],
                 ),
                 CommandIR(
                     name="UnscaledSignedTemperature",
@@ -360,9 +340,7 @@ def expect_unit_profile_mappings() -> None:
                 ),
                 CommandIR(
                     name="FloatTemperature",
-                    fields=[
-                        FieldIR(name="value", ebus_type="FLOAT32", unit="°C")
-                    ],
+                    fields=[FieldIR(name="value", ebus_type="FLOAT32", unit="°C")],
                 ),
                 CommandIR(
                     name="HalfScaledSignedTemperature",
@@ -505,48 +483,90 @@ def main() -> int:
     # (full field path joined with '_'); consecutive BI0..BI7 runs collapse
     # into one UINT8 field carrying the `bits` name->bit map.
     expect_fields(
-        errors, "Currenterror",
-        ["value_error", "value_error_1", "value_error_2",
-         "value_error_3", "value_error_4"],
+        errors,
+        "Currenterror",
+        [
+            "value_error",
+            "value_error_1",
+            "value_error_2",
+            "value_error_3",
+            "value_error_4",
+        ],
     )
     expect_positions(errors, "Currenterror", [1, 3, 5, 7, 9])
     expect_fields(
-        errors, "Errorhistory",
-        ["index", "errorhistory_status", "errorhistory_time",
-         "errorhistory_date", "errorhistory_error"],
+        errors,
+        "Errorhistory",
+        [
+            "index",
+            "errorhistory_status",
+            "errorhistory_time",
+            "errorhistory_date",
+            "errorhistory_error",
+        ],
     )
     expect_positions(errors, "Errorhistory", [1, 2, 3, 5, 8])
     expect_fields(
-        t392, "CcTimer_Monday",
-        ["value_slot1_slot_from", "value_slot1_slot_to",
-         "value_slot1_slot_1_from", "value_slot1_slot_1_to",
-         "value_slot1_slot_2_from", "value_slot1_slot_2_to",
-         "value_daysel"],
+        t392,
+        "CcTimer_Monday",
+        [
+            "value_slot1_slot_from",
+            "value_slot1_slot_to",
+            "value_slot1_slot_1_from",
+            "value_slot1_slot_1_to",
+            "value_slot1_slot_2_from",
+            "value_slot1_slot_2_to",
+            "value_daysel",
+        ],
     )
     expect_positions(t392, "CcTimer_Monday", [1, 2, 3, 4, 5, 6, 7])
     expect_fields(ehp, "PhaseStatus", ["value_phase"])
     expect_bits(
-        ehp, "PhaseStatus", "value_phase",
+        ehp,
+        "PhaseStatus",
+        "value_phase",
         {"value_phase": 0, "value_phase_1": 1, "value_phase_2": 2},
     )
     expect_fields(
-        hcmode, "SetMode",
-        ["hcmode", "flowtempdesired", "hwctempdesired", "hwcflowtempdesired",
-         "ign", "disablehc", "ign_1", "remoteControlHcPump"],
+        hcmode,
+        "SetMode",
+        [
+            "hcmode",
+            "flowtempdesired",
+            "hwctempdesired",
+            "hwcflowtempdesired",
+            "ign",
+            "disablehc",
+            "ign_1",
+            "remoteControlHcPump",
+        ],
     )
     expect_positions(hcmode, "SetMode", [1, 2, 3, 4, 5, 6, 7, 8])
     expect_bits(
-        hcmode, "SetMode", "disablehc",
+        hcmode,
+        "SetMode",
+        "disablehc",
         {"disablehc": 0, "disablehwctapping": 1, "disablehwcload": 2},
     )
     expect_bits(
-        hcmode, "SetMode", "remoteControlHcPump",
+        hcmode,
+        "SetMode",
+        "remoteControlHcPump",
         {"remoteControlHcPump": 0, "releaseBackup": 1, "releaseCooling": 2},
     )
     expect_fields(
-        ehp, "SetMode",
-        ["hcmode", "flowtempdesired", "hwctempdesired", "hwcflowtempdesired",
-         "ign", "disablehc", "ign_1", "remoteControlHcPump"],
+        ehp,
+        "SetMode",
+        [
+            "hcmode",
+            "flowtempdesired",
+            "hwctempdesired",
+            "hwcflowtempdesired",
+            "ign",
+            "disablehc",
+            "ign_1",
+            "remoteControlHcPump",
+        ],
     )
     expect_fields(vd4, "SwitchRelays", ["bi"])
     expect_positions(vd4, "SwitchRelays", [1])
@@ -555,11 +575,39 @@ def main() -> int:
     expect_positions(vd4, "ActualDigitalInputs", [1])
     expect_bits(vd4, "ActualDigitalInputs", "bi", {"bi": 0, "bi_1": 1})
 
+    # Same-line decorated fillers (`@maxLength(N) ign: IGN;`) must survive
+    # parsing: dropping them shifts every successor's byte position.
+    vai = entries_for("src/vaillant/15.vai.tsp")
+    expect_fields(vai, "Time", ["value_value", "value_ign"])
+    expect_positions(vai, "Time", [1, 4])
+    expect_fields(vai, "Date", ["value_value", "value_ign"])
+    expect_positions(vai, "Date", [1, 4])
+    expect_fields(vai, "EcoModeUntil", ["value_ign", "value_value"])
+    expect_positions(vai, "EcoModeUntil", [1, 2])
+
+    hwcmode = entries_for("src/vaillant/hwcmode_inc.tsp")
+    expect_positions(hwcmode, "Mode", [1, 2, 3, 5, 6, 7, 8])
+    expect_positions(hwcmode, "Params", [1, 2, 5, 6, 7, 8, 9, 10])
+
+    bai = entries_for("src/vaillant/bai.0010021901_inc.tsp")
+    expect_positions(bai, "NightTimeOffset", [1, 8])
+    ctlv2_ids = entries_for("src/vaillant/15.ctlv2.tsp")
+    expect_positions(ctlv2_ids, "HwcTimer_Monday0", [1, 2, 4, 6])
+    bai_profiles, bai_commands = profile_outputs_for(
+        "src/vaillant/bai.0010021901_inc.tsp"
+    )
+    expect_profile_metadata(
+        bai_profiles,
+        bai_commands,
+        "NightTimeOffset",
+        {"profile": "char7"},
+        {"datatype": "CHAR7"},
+        field_name="ign",
+    )
+
     # Field-level metadata is emitted on both command fields and the
     # corresponding profile; differing limits/precision must not deduplicate.
-    ctlv2_profiles, ctlv2_commands = profile_outputs_for(
-        "src/vaillant/15.ctlv2.tsp"
-    )
+    ctlv2_profiles, ctlv2_commands = profile_outputs_for("src/vaillant/15.ctlv2.tsp")
     expect_profile_metadata(
         ctlv2_profiles,
         ctlv2_commands,

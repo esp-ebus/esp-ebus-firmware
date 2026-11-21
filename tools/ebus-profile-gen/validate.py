@@ -6,9 +6,16 @@ Validation is derived from two sources:
   decision (type classification, profile selection, skips, collisions), and
 * the emitted JSON entries (:func:`check_no_trailing_underscores`).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
+
+# Mirror of COMMAND_MAX_FIELDS (platformio.ini): the firmware's per-command
+# field table size and the schema's documented 1..13 range
+# (doc/command-schema.md). Fieldless commands are a supported feature
+# (whole-payload writes), so only the upper bound is enforced here.
+MAX_FIELDS_PER_COMMAND = 13
 
 
 def check_no_trailing_underscores(obj: Any, path: str = "") -> List[str]:
@@ -17,7 +24,9 @@ def check_no_trailing_underscores(obj: Any, path: str = "") -> List[str]:
         for k, v in obj.items():
             if k.endswith("_"):
                 issues.append(f"trailing underscore in key: {path}.{k}")
-            issues.extend(check_no_trailing_underscores(v, f"{path}.{k}" if path else k))
+            issues.extend(
+                check_no_trailing_underscores(v, f"{path}.{k}" if path else k)
+            )
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
             issues.extend(check_no_trailing_underscores(v, f"{path}[{i}]"))
@@ -80,9 +89,7 @@ def validate_log(
             )
 
         if action == "emitted" and rec.get("rw") == "write" and not rec.get("wid"):
-            issues.append(
-                f"[{stage}] writable command has no wid: {rec.get('name')!r}"
-            )
+            issues.append(f"[{stage}] writable command has no wid: {rec.get('name')!r}")
 
         if action == "emitted" and rec.get("zz") is not None:
             id_hex = rec.get("id", "")
@@ -93,8 +100,7 @@ def validate_log(
 
             if not id_hex and not wid_hex:
                 issues.append(
-                    f"[{stage}] command has neither id nor wid: "
-                    f"{rec.get('name')!r}"
+                    f"[{stage}] command has neither id nor wid: {rec.get('name')!r}"
                 )
             elif not id_hex:
                 # Write-only command: id is empty by design, wid carries
@@ -106,8 +112,7 @@ def validate_log(
                     )
             elif not (4 <= len(id_hex) <= 12 and len(id_hex) % 2 == 0):
                 issues.append(
-                    f"[{stage}] id must be 2..6 bytes: "
-                    f"{rec.get('name')!r} ({id_hex!r})"
+                    f"[{stage}] id must be 2..6 bytes: {rec.get('name')!r} ({id_hex!r})"
                 )
             if wid_hex and not _wid_ok(wid_hex):
                 issues.append(
@@ -118,6 +123,12 @@ def validate_log(
     if profiles_entries is not None and commands_entries is not None:
         known = {p.get("name") for p in profiles_entries}
         for cmd in commands_entries:
+            field_count = len(cmd.get("fields", []))
+            if field_count > MAX_FIELDS_PER_COMMAND:
+                issues.append(
+                    f"[command] {cmd.get('key')} has {field_count} fields "
+                    f"(max {MAX_FIELDS_PER_COMMAND})"
+                )
             for field in cmd.get("fields", []):
                 profile = field.get("profile")
                 if profile and profile not in known:

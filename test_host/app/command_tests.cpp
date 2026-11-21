@@ -658,6 +658,75 @@ TEST_CASE("Command multi-field write auto-pads ign fillers", "[Command]") {
   REQUIRE(cmd.getVectorFromValue(R"({"value":5})").empty());
 }
 
+TEST_CASE("Command write auto-pads prefixed ign fillers", "[Command]") {
+  // Composite expansion prefixes filler names with the parent field
+  // (15.vai Time/Date: Register<timesuf> + `@maxLength(1) ign: IGN;`).
+  const std::string json = R"({
+  "key": "ignpref",
+  "name": "IgnPref",
+  "zz": "50",
+  "pbsb": "0301",
+  "wpbsb": "b509",
+  "wdx": "0400",
+  "interval": 0,
+  "master": false,
+  "fields": [
+    {"name": "value_value", "profile": "uint8", "position": 1, "ha_profile": ""},
+    {"name": "value_ign", "profile": "char1", "position": 2, "ha_profile": ""},
+    {"name": "value_ign_1", "profile": "char1", "position": 3, "ha_profile": ""},
+    {"name": "tail", "profile": "uint8", "position": 4, "ha_profile": ""}
+  ]
+})";
+  JsonReader validation(json);
+  REQUIRE(Command::evaluate(validation).empty());
+  JsonReader reader(json);
+  Command cmd = Command::fromJson(reader);
+
+  auto v = cmd.getVectorFromValue(R"({"value_value":5,"tail":9})");
+  REQUIRE(v.size() == 4);
+  REQUIRE(v[0] == 5);
+  REQUIRE(v[1] == 0);
+  REQUIRE(v[2] == 0);
+  REQUIRE(v[3] == 9);
+
+  auto v2 = cmd.getVectorFromValue(
+      R"({"value_value":5,"value_ign":"A","value_ign_1":"B","tail":9})");
+  REQUIRE(v2.size() == 4);
+  REQUIRE(v2[1] == 'A');
+  REQUIRE(v2[2] == 'B');
+
+  REQUIRE(cmd.getVectorFromValue(R"({"value_value":5})").empty());
+}
+
+TEST_CASE("Command write does not pad ign-like non-filler names", "[Command]") {
+  const std::string json = R"({
+  "key": "ignlike",
+  "name": "IgnLike",
+  "zz": "50",
+  "pbsb": "0301",
+  "wpbsb": "b509",
+  "wdx": "0400",
+  "interval": 0,
+  "master": false,
+  "fields": [
+    {"name": "value", "profile": "uint8", "position": 1, "ha_profile": ""},
+    {"name": "ignition", "profile": "char1", "position": 2, "ha_profile": ""},
+    {"name": "tail", "profile": "uint8", "position": 3, "ha_profile": ""}
+  ]
+})";
+  JsonReader validation(json);
+  REQUIRE(Command::evaluate(validation).empty());
+  JsonReader reader(json);
+  Command cmd = Command::fromJson(reader);
+
+  // `ignition` is an ordinary required field, not a filler: omitting it
+  // rejects instead of silently padding.
+  REQUIRE(cmd.getVectorFromValue(R"({"value":5,"tail":9})").empty());
+  auto v = cmd.getVectorFromValue(R"({"value":5,"ignition":"A","tail":9})");
+  REQUIRE(v.size() == 3);
+  REQUIRE(v[1] == 'A');
+}
+
 TEST_CASE("Command single-field accepts scalar and object forms", "[Command]") {
   const std::string json = R"({
   "key": "sf",
@@ -780,8 +849,7 @@ TEST_CASE("Command builds fieldless write without a value", "[Command]") {
   const uint8_t expect[] = {0x08, 0xb5, 0x06, 0x01, 0x01};
   REQUIRE(seq.size() == sizeof(expect));
   for (size_t i = 0; i < sizeof(expect); i++) REQUIRE(seq[i] == expect[i]);
-  REQUIRE(cmd.buildWriteSequence(command_manager, {}).size() ==
-          sizeof(expect));
+  REQUIRE(cmd.buildWriteSequence(command_manager, {}).size() == sizeof(expect));
 }
 
 TEST_CASE("Command buildWriteCmd is empty for read-only command", "[Command]") {
