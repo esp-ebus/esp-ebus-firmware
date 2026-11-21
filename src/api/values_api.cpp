@@ -77,22 +77,39 @@ esp_err_t ValuesApi::handleValuesWrite(httpd_req_t* req) {
     return ESP_OK;
   }
 
-  ebus::Sequence value_bytes = command->getVectorFromJson(body_sv);
-  if (!value_bytes.empty()) {
-    ebus::Sequence full_write =
-        command->buildWriteSequence(instance_->command_manager_, value_bytes);
-    if (full_write.empty()) {
+  if (!command->hasWriteCmd()) {
+    HttpUtils::sendErrorResponse(req, "400 Bad Request", "write",
+                                 "Command '" + key + "' is read-only");
+    return ESP_OK;
+  }
+
+  ebus::detail::JsonReader value_reader(body_sv);
+  const bool has_value =
+      value_reader.next() == ebus::detail::JsonReader::Token::object_start &&
+      value_reader.findKey("value");
+  const bool fieldless_write =
+      !has_value && command->canWriteWithoutValue();
+
+  ebus::Sequence value_bytes;
+  if (!fieldless_write) {
+    value_bytes = command->getVectorFromJson(body_sv);
+    if (value_bytes.empty()) {
       HttpUtils::sendErrorResponse(req, "400 Bad Request", "write",
-                                   "Invalid write command format");
+                                   "Invalid value for key '" + key + "'");
       return ESP_OK;
     }
-    getEbusController().enqueue(app::priority::send, full_write);
-    command->setLast(0);
-    HttpUtils::sendSuccessResponse(req, "write");
-  } else {
-    HttpUtils::sendErrorResponse(req, "400 Bad Request", "write",
-                                 "Invalid value for key '" + key + "'");
   }
+
+  ebus::Sequence full_write =
+      command->buildWriteSequence(instance_->command_manager_, value_bytes);
+  if (full_write.empty()) {
+    HttpUtils::sendErrorResponse(req, "400 Bad Request", "write",
+                                 "Invalid write command format");
+    return ESP_OK;
+  }
+  getEbusController().enqueue(app::priority::send, full_write);
+  command->setLast(0);
+  HttpUtils::sendSuccessResponse(req, "write");
   return ESP_OK;
 }
 

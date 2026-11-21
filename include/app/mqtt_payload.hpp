@@ -5,11 +5,12 @@
 
 // How command values are published under "<root>/values/".
 enum class MqttPayloadMode : uint8_t {
-  // values/<command> -> {"<field>":v,...} (one JSON object per command)
+  // values/<key>/<name> -> {"<field>":v,...} (one JSON object per command)
   json_multivalue,
-  // values/<field> -> {"value":v} (one topic per field of multi-field commands)
+  // values/<key>/<field> -> {"value":v} (one topic per field of multi-field
+  // commands)
   json_singlevalue,
-  // values/<field> -> v (one topic per field, raw scalar)
+  // values/<key>/<field> -> v (one topic per field, raw scalar)
   plain
 };
 
