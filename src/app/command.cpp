@@ -1065,33 +1065,32 @@ Command Command::fromTabular(ebus::detail::JsonReader& reader, bool legacy,
   // rows carry zz/pbsb/dx/[nn]/wpbsb/wdx. The split halves are buffered and
   // concatenated after the loop (column order is header-defined).
   enum Col {
-    kKey,
-    kName,
-    kRead,
-    kWrite,
-    kZz,
-    kId,
-    kNn,
-    kWid,
-    kPbsb,
-    kDx,
-    kWpbsb,
-    kWdx,
-    kInterval,
-    kMaster,
-    kFields
+    key,
+    name,
+    read,
+    write,
+    zz,
+    id,
+    nn,
+    wid,
+    pbsb,
+    dx,
+    wpbsb,
+    wdx,
+    col_interval,
+    master,
+    fields
   };
-  static constexpr Col legacy_cols[] = {kKey,      kName,   kRead,  kWrite,
-                                        kInterval, kMaster, kFields};
+  static constexpr Col legacy_cols[] = {key,          name,   read,  write,
+                                        col_interval, master, fields};
   static constexpr Col compact_cols_nn[] = {
-      kKey, kName, kZz, kId, kNn, kWid, kInterval, kMaster, kFields};
-  static constexpr Col compact_cols[] = {kKey, kName,     kZz,     kId,
-                                         kWid, kInterval, kMaster, kFields};
-  static constexpr Col split_cols_nn[] = {kKey,      kName,   kZz,    kPbsb,
-                                          kDx,       kNn,     kWpbsb, kWdx,
-                                          kInterval, kMaster, kFields};
+      key, name, zz, id, nn, wid, col_interval, master, fields};
+  static constexpr Col compact_cols[] = {key, name,         zz,     id,
+                                         wid, col_interval, master, fields};
+  static constexpr Col split_cols_nn[] = {
+      key, name, zz, pbsb, dx, nn, wpbsb, wdx, col_interval, master, fields};
   static constexpr Col split_cols[] = {
-      kKey, kName, kZz, kPbsb, kDx, kWpbsb, kWdx, kInterval, kMaster, kFields};
+      key, name, zz, pbsb, dx, wpbsb, wdx, col_interval, master, fields};
   const Col* cols = legacy
                         ? legacy_cols
                         : (split ? (has_nn ? split_cols_nn : split_cols)
@@ -1129,41 +1128,41 @@ Command Command::fromTabular(ebus::detail::JsonReader& reader, bool legacy,
                         : -1;
 
     switch (col) {
-      case kKey:
+      case key:
         command.key_id_ = StringPool::instance().intern(reader.value());
         break;
-      case kName:
+      case name:
         command.name_id_ = StringPool::instance().intern(reader.value());
         break;
-      case kRead: {
+      case read: {
         uint8_t hex_buf[64];
         size_t hex_len =
             ebus::toBytes(reader.value(), hex_buf, sizeof(hex_buf));
         command.setLegacyReadCmd(ebus::ByteView(hex_buf, hex_len));
         break;
       }  // NOLINT(bugprone-branch-ctl-initializer)
-      case kWrite: {
+      case write: {
         uint8_t hex_buf[64];
         size_t hex_len =
             ebus::toBytes(reader.value(), hex_buf, sizeof(hex_buf));
         command.setLegacyWriteCmd(ebus::ByteView(hex_buf, hex_len));
         break;
       }  // NOLINT(bugprone-branch-ctl-initializer)
-      case kZz: {
+      case zz: {
         uint8_t hex_buf[8];
         if (ebus::toBytes(reader.value(), hex_buf, sizeof(hex_buf)) == 1) {
           command.zz_ = hex_buf[0];
         }
         break;
       }
-      case kId: {
+      case id: {
         uint8_t hex_buf[8];
         size_t hex_len =
             ebus::toBytes(reader.value(), hex_buf, sizeof(hex_buf));
         command.setIdBytes(ebus::ByteView(hex_buf, hex_len));
         break;
       }
-      case kNn: {
+      case nn: {
         uint8_t hex_buf[8];
         if (ebus::toBytes(reader.value(), hex_buf, sizeof(hex_buf)) == 1) {
           command.has_nn_ovr_ = true;
@@ -1171,40 +1170,40 @@ Command Command::fromTabular(ebus::detail::JsonReader& reader, bool legacy,
         }
         break;
       }
-      case kWid: {
+      case wid: {
         uint8_t hex_buf[8];
         size_t hex_len =
             ebus::toBytes(reader.value(), hex_buf, sizeof(hex_buf));
         command.setWidBytes(ebus::ByteView(hex_buf, hex_len));
         break;
       }
-      case kPbsb: {
+      case pbsb: {
         pbsb_len = ebus::toBytes(reader.value(), pbsb_buf, sizeof(pbsb_buf));
         have_split_id = true;
         break;
       }
-      case kDx: {
+      case dx: {
         dx_len = ebus::toBytes(reader.value(), dx_buf, sizeof(dx_buf));
         have_split_id = true;
         break;
       }
-      case kWpbsb: {
+      case wpbsb: {
         wpbsb_len = ebus::toBytes(reader.value(), wpbsb_buf, sizeof(wpbsb_buf));
         have_split_wid = true;
         break;
       }
-      case kWdx: {
+      case wdx: {
         wdx_len = ebus::toBytes(reader.value(), wdx_buf, sizeof(wdx_buf));
         have_split_wid = true;
         break;
       }
-      case kInterval:
+      case col_interval:
         command.interval_ = reader.asNum<uint16_t>();
         break;
-      case kMaster:
+      case master:
         command.master_ = reader.asBool();
         break;
-      case kFields: {
+      case fields: {
         if (token == ebus::detail::JsonReader::Token::array_start) {
           while (true) {
             auto ft = reader.next();
