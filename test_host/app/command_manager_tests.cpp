@@ -642,6 +642,43 @@ TEST_CASE("CommandManager loadCommands rewrites retired id/wid schema once",
   command_manager.wipeCommands();
 }
 
+TEST_CASE(
+    "CommandManager loadCommands rewrites tabular write_type header to "
+    "write_encoding",
+    "[CommandManager]") {
+  command_manager.wipeCommands();
+
+  char path[256];
+  std::snprintf(path, sizeof(path), "%s.%ld", EBUS_COMMANDS_FILE_PATH,
+                static_cast<long>(getpid()));
+
+  const char* tabular_legacy =
+      R"([["key","name","zz","pbsb","dx","wpbsb","wdx","interval","master","fields","write_type"],)"
+      R"(["32","Writer","50","b509","0d3300","b509","0e3300",60,false,)"
+      R"([{"name":"value","profile":"data1c_celsius","position":1,"ha_profile":""}],"simple"]])";
+  FILE* f = std::fopen(path, "wb");
+  REQUIRE(f != nullptr);
+  std::fwrite(tabular_legacy, 1, std::strlen(tabular_legacy), f);
+  std::fclose(f);
+
+  REQUIRE(command_manager.loadCommands() > 0);
+  REQUIRE(command_manager.getCommandCount() == 1);
+
+  // The rewritten file carries write_encoding instead of write_type.
+  std::string saved;
+  f = std::fopen(path, "rb");
+  REQUIRE(f != nullptr);
+  char chunk[256];
+  size_t n;
+  while ((n = std::fread(chunk, 1, sizeof(chunk), f)) > 0)
+    saved.append(chunk, n);
+  std::fclose(f);
+  REQUIRE(saved.find("\"write_encoding\"") != std::string::npos);
+  REQUIRE(saved.find("\"write_type\"") == std::string::npos);
+
+  command_manager.wipeCommands();
+}
+
 TEST_CASE("CommandManager saveCommands round-trips bits maps",
           "[CommandManager]") {
   command_manager.wipeCommands();

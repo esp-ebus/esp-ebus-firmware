@@ -59,6 +59,11 @@ std::string_view evaluateCommands(ebus::detail::JsonReader& reader) {
                   "wpbsb/wdx (write side)";
               break;
             }
+            if (row_reader.value() == "write_type") {
+              eval_error =
+                  "Unsupported column 'write_type': use write_encoding";
+              break;
+            }
           }
         }
         if (!eval_error.empty()) break;

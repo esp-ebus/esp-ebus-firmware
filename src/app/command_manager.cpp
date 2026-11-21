@@ -839,6 +839,8 @@ void CommandManager::deserializeCommands(FILE* file) {
               has_nn_col = true;
             } else if (row_reader.value() == "pbsb") {
               has_split_cols = true;
+            } else if (row_reader.value() == "write_type") {
+              saw_legacy = true;
             }
           }
         }
