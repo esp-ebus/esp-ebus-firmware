@@ -17,7 +17,7 @@
 
 namespace command_types {
 
-enum class WriteType : uint8_t { simple, weishaupt, invalid };
+enum class Encoding : uint8_t { simple, weishaupt, invalid };
 
 #ifndef COMMAND_MAX_FIELDS
 inline constexpr size_t max_fields = 4;
@@ -83,20 +83,20 @@ class Command {
   // Builds the complete write master telegram ZZ wid[0] wid[1] NN
   // wid[2..] + value with NN = len(wid)-2 + value.size() (always
   // derived; the legacy write_cmd NN byte is discarded at parse time).
-  // Simple write_type only; empty when the command is not writable.
+  // Simple write_encoding only; empty when the command is not writable.
   ebus::Sequence buildWriteCmd(ebus::ByteView value) const;
 
   bool hasWriteCmd() const;
   bool canWriteWithoutValue() const;
 
-  // Builds the full write frame for the command's write_type: buildWriteCmd
+  // Builds the full write frame for the command's write_encoding: buildWriteCmd
   // for simple, the weishaupt 5023 encoding for weishaupt. Empty for
   // read-only commands, unsupported empty values and rejected encodings.
   ebus::Sequence buildWriteSequence(const class CommandManager& manager,
                                     ebus::ByteView value) const;
 
-  command_types::WriteType getWriteType() const { return write_type_; }
-  const char* getWriteTypeName() const;
+  command_types::Encoding getWriteEncoding() const { return write_encoding_; }
+  const char* getWriteEncodingName() const;
 
   bool getActive() const;
   const uint16_t& getInterval() const;
@@ -212,7 +212,7 @@ class Command {
   uint8_t nn_ovr_ = 0;
   uint16_t interval_ = 60;
   bool master_ = false;
-  command_types::WriteType write_type_ = command_types::WriteType::simple;
+  command_types::Encoding write_encoding_ = command_types::Encoding::simple;
 
   command_types::FieldVector fields_;
 };

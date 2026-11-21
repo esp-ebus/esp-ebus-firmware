@@ -25,7 +25,7 @@ error is rejected as a whole, never installed truncated.
 | `write_cmd` | hex string | no | Legacy wire form of the write id; the NN byte is discarded on parse. |
 | `zz` | hex string | yes with `pbsb`/`wpbsb` | Target address, 1 byte. Not required for pure `read_cmd` input (the wire hex carries ZZ). |
 | `nn` | hex string | no | Explicit read-NN override, 1 byte (quirks only — see Frame construction). |
-| `write_type` | string | no | `"simple"` (default) or `"weishaupt"` ([`doc/weishaupt-writes.md`](weishaupt-writes.md)). |
+| `write_encoding` | string | no | `"simple"` (default) or `"weishaupt"` ([`doc/weishaupt-writes.md`](weishaupt-writes.md)). |
 | `interval` | number | no | Seconds. `0` = passive (evaluate when seen on the bus); `> 0` = actively poll every N seconds. |
 | `master` | bool | no | Value lives in the master part (`true`) or the slave answer (`false`). |
 | `fields` | array | yes | Decoders for the data bytes (see below), 1..13 entries. |

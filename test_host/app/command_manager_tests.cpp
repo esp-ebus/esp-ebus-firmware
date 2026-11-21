@@ -475,7 +475,7 @@ TEST_CASE("Weishaupt write opt-in survives storage and JSON export",
   "name": "WCM",
   "read_cmd": "75502203700500",
   "write_cmd": "70502309000500",
-  "write_type": "weishaupt",
+  "write_encoding": "weishaupt",
   "interval": 60,
   "master": false,
   "fields": [
@@ -493,11 +493,12 @@ TEST_CASE("Weishaupt write opt-in survives storage and JSON export",
   REQUIRE(command_manager.loadCommands() > 0);
   const auto* cmd = command_manager.findCommand("stored_wcm");
   REQUIRE(cmd != nullptr);
-  REQUIRE(cmd->getWriteType() == command_types::WriteType::weishaupt);
+  REQUIRE(cmd->getWriteEncoding() == command_types::Encoding::weishaupt);
   std::string exported;
   command_manager.fetchCommands(
       [&](std::string_view chunk) { exported += chunk; });
-  REQUIRE(exported.find("\"write_type\":\"weishaupt\"") != std::string::npos);
+  REQUIRE(exported.find("\"write_encoding\":\"weishaupt\"") !=
+          std::string::npos);
   command_manager.wipeCommands();
 }
 

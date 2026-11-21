@@ -427,7 +427,7 @@ TEST_CASE("Weishaupt room writes reproduce captured 5023 telegrams",
         std::string(
             R"({"key":"room_test","name":"Room","read_cmd":"75502203700500","write_cmd":")") +
         ex.destination + "50230900" + ex.parameter +
-        R"(","write_type":"weishaupt","interval":60,"master":false,"fields":[{"name":"value","profile":"int16_celsius_div10","position":1,"min":5,"max":30}]})";
+        R"(","write_encoding":"weishaupt","interval":60,"master":false,"fields":[{"name":"value","profile":"int16_celsius_div10","position":1,"min":5,"max":30}]})";
     JsonReader reader(json);
     Command cmd = Command::fromJson(reader);
     auto value = cmd.getVectorFromValue(std::to_string(ex.value));
@@ -455,7 +455,7 @@ TEST_CASE("Standard writes derive NN even for a 5023 prefix", "[Command]") {
         R"(","interval":60,"master":false,"fields":[{"name":"value","profile":"uint16","position":1}]})";
     JsonReader reader(json);
     Command cmd = Command::fromJson(reader);
-    REQUIRE(cmd.getWriteType() == command_types::WriteType::simple);
+    REQUIRE(cmd.getWriteEncoding() == command_types::Encoding::simple);
     const uint8_t value[] = {0xaa, 0x00};
     auto frame =
         cmd.buildWriteSequence(command_manager, ebus::ByteView(value, 2));
@@ -481,7 +481,7 @@ TEST_CASE("Structurally malformed weishaupt writes are rejected", "[Command]") {
         std::string(
             R"({"key":"badwrite","name":"Bad","read_cmd":"085003019e","write_cmd":")") +
         hex +
-        R"(","write_type":"weishaupt","interval":60,"master":false,)"
+        R"(","write_encoding":"weishaupt","interval":60,"master":false,)"
         R"("fields":[{"name":"value","profile":"uint16","position":1}]})";
     JsonReader reader(json);
     Command cmd = Command::fromJson(reader);
@@ -499,7 +499,7 @@ TEST_CASE("Structurally malformed weishaupt writes are rejected", "[Command]") {
   "name": "Good",
   "read_cmd": "085003019e",
   "write_cmd": "70502309000500",
-  "write_type": "weishaupt",
+  "write_encoding": "weishaupt",
   "fields": [
     {
       "name": "value",
@@ -521,9 +521,9 @@ TEST_CASE("Structurally malformed weishaupt writes are rejected", "[Command]") {
 
 TEST_CASE("Write types reject unknown names and non-strings", "[Command]") {
   const char* settings[] = {
-      R"("write_type":"other")", R"("write_type":true)",
-      R"("write_type":false)",   R"("write_type":null)",
-      R"("write_type":1)",       R"("write_type":"default")"};
+      R"("write_encoding":"other")", R"("write_encoding":true)",
+      R"("write_encoding":false)",   R"("write_encoding":null)",
+      R"("write_encoding":1)",       R"("write_encoding":"default")"};
   for (auto setting : settings) {
     const std::string json =
         std::string(
@@ -547,7 +547,7 @@ TEST_CASE("Explicit simple writes derive NN and preserve data bytes",
   "name": "Simple",
   "read_cmd": "085003019e",
   "write_cmd": "70502309ab0500",
-  "write_type": "simple",
+  "write_encoding": "simple",
   "fields": [
     {
       "name": "value",
@@ -560,7 +560,7 @@ TEST_CASE("Explicit simple writes derive NN and preserve data bytes",
   REQUIRE(Command::evaluate(validation).empty());
   JsonReader reader(json);
   Command cmd = Command::fromJson(reader);
-  REQUIRE(cmd.getWriteType() == command_types::WriteType::simple);
+  REQUIRE(cmd.getWriteEncoding() == command_types::Encoding::simple);
   const uint8_t value[] = {0xaa, 0};
   // NN byte (09) is discarded: derived = wid_len-2 + 2 = 05; the D tail
   // (ab 05 00) is preserved byte-exact.
@@ -766,7 +766,7 @@ TEST_CASE("Tabular write types reject boolean and unknown values",
         type + "]";
     JsonReader reader(row);
     Command cmd = Command::fromTabular(reader, true);
-    REQUIRE(cmd.getWriteType() == command_types::WriteType::invalid);
+    REQUIRE(cmd.getWriteEncoding() == command_types::Encoding::invalid);
     const uint8_t value[] = {0xd2, 0};
     REQUIRE(cmd.buildWriteSequence(command_manager, ebus::ByteView(value, 2))
                 .empty());
@@ -968,7 +968,8 @@ TEST_CASE("Command evaluate accepts split schema", "[Command]") {
   REQUIRE(error.find("zz") != std::string_view::npos);
 }
 
-TEST_CASE("Command evaluate rejects retired id/wid keys", "[Command]") {
+TEST_CASE("Command evaluate rejects retired id/wid and write_type keys",
+          "[Command]") {
   const char* fixtures[] = {
       R"({"key":"01","name":"T","zz":"fe","id":"0700","interval":0,)"
       R"("master":true,"fields":[{"name":"v","profile":"uint8",)"
@@ -976,12 +977,30 @@ TEST_CASE("Command evaluate rejects retired id/wid keys", "[Command]") {
       R"({"key":"01","name":"T","zz":"fe","wid":"07000e","interval":0,)"
       R"("master":true,"fields":[{"name":"v","profile":"uint8",)"
       R"("position":1,"ha_profile":""}]})",
+      R"({"key":"01","name":"T","zz":"fe","pbsb":"0700","dx":"","interval":0,)"
+      R"("master":true,"write_type":"weishaupt","fields":[{"name":"v","profile":"uint8",)"
+      R"("position":1,"ha_profile":""}]})",
   };
   for (const char* json : fixtures) {
     JsonReader reader(json);
     std::string_view error = Command::evaluate(reader);
     REQUIRE_FALSE(error.empty());
     REQUIRE(error.find("Unsupported key") != std::string_view::npos);
+  }
+  // write_type is accepted under allow_legacy and sets used_legacy.
+  {
+    const char* legacy_wt =
+        R"({"key":"01","name":"T","zz":"fe","pbsb":"0700","dx":"","interval":0,)"
+        R"("master":true,"write_type":"weishaupt","fields":[{"name":"v","profile":"uint8",)"
+        R"("position":1,"ha_profile":""}]})";
+    JsonReader reader(legacy_wt);
+    bool used_legacy = false;
+    std::string_view error = Command::evaluate(reader, true, &used_legacy);
+    REQUIRE(error.empty());
+    REQUIRE(used_legacy);
+    JsonReader direct_reader(legacy_wt);
+    Command cmd = Command::fromJson(direct_reader);
+    REQUIRE(cmd.getWriteEncoding() == command_types::Encoding::weishaupt);
   }
   // dx/wdx without their PBSB half is rejected too.
   std::string orphan_dx =

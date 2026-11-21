@@ -81,7 +81,7 @@ Commands are defined as a JSON array of objects. Each command object specifies a
 - **`nn`** *(hex string, optional)*: Explicit 1-byte read NN for the rare telegrams where it differs from the derived `len(dx)`.
 - **`wpbsb`** *(hex string, optional)*: First 2 bytes of the write id (e.g. `"b509"`). Presence of `wpbsb`/`wdx` makes the command writable.
 - **`wdx`** *(hex string, optional)*: Write id tail (0–4 bytes); the write id is `wpbsb` + `wdx`. The write NN is computed at runtime as `len(wdx)` plus the appended value bytes. Omit `wpbsb`/`wdx` for read-only commands.
-- **`write_type`** *(string, optional)*: Write encoding: `"simple"` (default) appends the value to the write id frame; `"weishaupt"` opts into the WCM 5023 encoding with a two-byte value. See [Weishaupt write support](../doc/weishaupt-writes.md).
+- **`write_encoding`** *(string, optional)*: Write encoding: `"simple"` (default) appends the value to the write id frame; `"weishaupt"` opts into the WCM 5023 encoding with a two-byte value. See [Weishaupt write support](../doc/weishaupt-writes.md).
 - **`interval`** *(integer)*: Automatic polling interval in seconds. `0` disables active polling (passive listening only).
 - **`master`** *(boolean)*: `true` if field data is located in the master message payload; `false` if in the slave response payload.
 - **`fields`** *(array)*: Array of data field definitions (max 13 per command).
@@ -105,4 +105,4 @@ frame construction): [`doc/command-schema.md`](../doc/command-schema.md).
 [`weishaupt-wtc.json`](weishaupt-wtc.json) contains installation-specific read
 and optional write definitions. Adapt the bus addresses before uploading.
 See [Weishaupt write support](../doc/weishaupt-writes.md) for the explicit
-`write_type` option, units, readback and known limitations.
+`write_encoding` option, units, readback and known limitations.

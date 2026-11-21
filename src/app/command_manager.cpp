@@ -101,8 +101,8 @@ void CommandManager::setCommandRemovedCallback(
 }
 
 void CommandManager::insertCommand(Command command) {
-  if (command.getWriteType() == command_types::WriteType::invalid) {
-    logger.error("CommandManager: rejected unsupported write_type");
+  if (command.getWriteEncoding() == command_types::Encoding::invalid) {
+    logger.error("CommandManager: rejected unsupported write_encoding");
     return;
   }
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -247,7 +247,7 @@ int64_t CommandManager::saveCommands() const {
 
     // Header row for tabular format. The optional nn column is only
     // present when at least one command carries an explicit read-NN
-    // override (derived NN is never serialized); write_type is always
+    // override (derived NN is never serialized); write_encoding is always
     // the trailing column. pbsb/dx and wpbsb/wdx are the split address
     // halves (read id = pbsb + dx, write id = wpbsb + wdx).
     const bool any_nn =
@@ -257,10 +257,10 @@ int64_t CommandManager::saveCommands() const {
       auto header_array = writer.arrayScope();
       static const char* header_nn[] = {
           "key",   "name", "zz",       "pbsb",   "dx",     "nn",
-          "wpbsb", "wdx",  "interval", "master", "fields", "write_type"};
+          "wpbsb", "wdx",  "interval", "master", "fields", "write_encoding"};
       static const char* header[] = {
-          "key", "name",     "zz",     "pbsb",   "dx",        "wpbsb",
-          "wdx", "interval", "master", "fields", "write_type"};
+          "key",      "name",   "zz",     "pbsb",          "dx", "wpbsb", "wdx",
+          "interval", "master", "fields", "write_encoding"};
       if (any_nn) {
         for (const char* h : header_nn) writer.writeValue(h);
       } else {
@@ -328,7 +328,7 @@ int64_t CommandManager::saveCommands() const {
           }
         }
       }
-      writer.writeValue(c.getWriteTypeName());
+      writer.writeValue(c.getWriteEncodingName());
     }
   }
   writer.flush();
@@ -408,7 +408,7 @@ void CommandManager::fetchCommands(
       }
       writer.writeField("interval", c->getInterval());
       writer.writeField("master", c->getMaster());
-      writer.writeField("write_type", c->getWriteTypeName());
+      writer.writeField("write_encoding", c->getWriteEncodingName());
 
       auto arr = writer.arrayScope("fields");
       for (size_t j = 0; j < c->getFieldCount(); j++) {

@@ -19,10 +19,10 @@
 #include "system/logger.hpp"
 
 namespace {
-command_types::WriteType parseWriteType(std::string_view name) {
-  if (name == "simple") return command_types::WriteType::simple;
-  if (name == "weishaupt") return command_types::WriteType::weishaupt;
-  return command_types::WriteType::invalid;
+command_types::Encoding parseWriteEncoding(std::string_view name) {
+  if (name == "simple") return command_types::Encoding::simple;
+  if (name == "weishaupt") return command_types::Encoding::weishaupt;
+  return command_types::Encoding::invalid;
 }
 
 // Wire filler fields are not client input: multi-field writes auto-pad
@@ -124,11 +124,11 @@ uint8_t weishauptChecksum(ebus::ByteView payload) {
 }
 }  // namespace
 
-const char* Command::getWriteTypeName() const {
-  switch (write_type_) {
-    case command_types::WriteType::simple:
+const char* Command::getWriteEncodingName() const {
+  switch (write_encoding_) {
+    case command_types::Encoding::simple:
       return "simple";
-    case command_types::WriteType::weishaupt:
+    case command_types::Encoding::weishaupt:
       return "weishaupt";
     default:
       return "invalid";
@@ -139,10 +139,10 @@ ebus::Sequence Command::buildWriteSequence(const CommandManager&,
                                            ebus::ByteView value) const {
   if (wid_len_ < 2 || (value.empty() && !canWriteWithoutValue())) return {};
 
-  if (write_type_ == command_types::WriteType::simple) {
+  if (write_encoding_ == command_types::Encoding::simple) {
     return buildWriteCmd(value);
   }
-  if (write_type_ != command_types::WriteType::weishaupt) return {};
+  if (write_encoding_ != command_types::Encoding::weishaupt) return {};
 
   // Prefix: destination, PB, SB, NN, checksum placeholder, parameter ID.
   constexpr size_t prefix_size = 7;
@@ -226,7 +226,7 @@ bool Command::hasWriteCmd() const { return wid_len_ != 0; }
 
 bool Command::canWriteWithoutValue() const {
   return fields_.empty() && hasWriteCmd() &&
-         write_type_ == command_types::WriteType::simple;
+         write_encoding_ == command_types::Encoding::simple;
 }
 
 size_t Command::buildReadCmd(uint8_t* out, size_t cap) const {
@@ -941,10 +941,10 @@ Command Command::fromJson(ebus::detail::JsonReader& reader) {
       uint8_t hex_buf[64];
       size_t hex_len = ebus::toBytes(r.value(), hex_buf, sizeof(hex_buf));
       command.setLegacyWriteCmd(ebus::ByteView(hex_buf, hex_len));
-    } else if (key == "write_type")
-      command.write_type_ = token == ebus::detail::JsonReader::Token::string
-                                ? parseWriteType(r.value())
-                                : command_types::WriteType::invalid;
+    } else if (key == "write_encoding" || key == "write_type")
+      command.write_encoding_ = token == ebus::detail::JsonReader::Token::string
+                                    ? parseWriteEncoding(r.value())
+                                    : command_types::Encoding::invalid;
     else if (key == "zz") {
       uint8_t hex_buf[8];
       if (ebus::toBytes(r.value(), hex_buf, sizeof(hex_buf)) == 1) {
@@ -1294,11 +1294,12 @@ Command Command::fromTabular(ebus::detail::JsonReader& reader, bool legacy,
         }
       } break;
       case -1:
-        // Trailing write_type column: schema's last column, after fields.
+        // Trailing write_encoding column: schema's last column, after fields.
         if (index == static_cast<int>(col_count)) {
-          command.write_type_ = token == ebus::detail::JsonReader::Token::string
-                                    ? parseWriteType(reader.value())
-                                    : command_types::WriteType::invalid;
+          command.write_encoding_ =
+              token == ebus::detail::JsonReader::Token::string
+                  ? parseWriteEncoding(reader.value())
+                  : command_types::Encoding::invalid;
         } else {
           reader.skipComposite(token);
         }
@@ -1475,10 +1476,22 @@ std::string_view Command::evaluate(ebus::detail::JsonReader& reader,
           error = command_eval_error_buf;
         }
       }
-    } else if (key == "write_type") {
+    } else if (key == "write_encoding") {
       if (token != ebus::detail::JsonReader::Token::string ||
-          parseWriteType(r.value()) == command_types::WriteType::invalid) {
-        error = "unknown write_type";
+          parseWriteEncoding(r.value()) == command_types::Encoding::invalid) {
+        error = "unknown write_encoding";
+      }
+    } else if (key == "write_type") {
+      if (!allow_legacy) {
+        snprintf(command_eval_error_buf, sizeof(command_eval_error_buf),
+                 "Unsupported key 'write_type': use write_encoding");
+        error = command_eval_error_buf;
+      } else {
+        if (used_legacy) *used_legacy = true;
+        if (token != ebus::detail::JsonReader::Token::string ||
+            parseWriteEncoding(r.value()) == command_types::Encoding::invalid) {
+          error = "unknown write_encoding";
+        }
       }
     } else if (key == "interval") {
       if (token != ebus::detail::JsonReader::Token::number) {

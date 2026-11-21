@@ -1,7 +1,7 @@
 # Optional Weishaupt 5023 writes
 
 INTERNAL firmware supports the captured WCM-FS parameter-write format when a
-command explicitly sets `"write_type": "weishaupt"`. Omit this property, or set
+command explicitly sets `"write_encoding": "weishaupt"`. Omit this property, or set
 it to `"simple"`, to preserve the existing write behavior: append the encoded
 value to `write_cmd` without modifying either byte sequence.
 
@@ -13,7 +13,7 @@ value to `write_cmd` without modifying either byte sequence.
   "name": "Weishaupt/Circuit_2_Downstairs/Normal_room_setpoint",
   "read_cmd": "75502203700500",
   "write_cmd": "70502309000500",
-  "write_type": "weishaupt",
+  "write_encoding": "weishaupt",
   "interval": 60,
   "master": false,
   "fields": [
