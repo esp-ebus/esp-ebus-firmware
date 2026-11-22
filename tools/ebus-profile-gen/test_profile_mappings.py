@@ -51,9 +51,7 @@ UNIT_MAPPINGS = (
 class UnitProfileMappingTests(unittest.TestCase):
     def test_corpus_unit_combinations_map_to_canonical_profiles(self):
         profiles = json.loads(
-            (ROOT / "profiles" / "data_profiles.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "profiles" / "data_profiles.json").read_text(encoding="utf-8")
         )
         by_name = {profile["name"]: profile for profile in profiles}
 

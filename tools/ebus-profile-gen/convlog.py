@@ -19,6 +19,7 @@ Classifications (for type resolution):
     unsupported - no native DataType equivalent (needs explicit decoding)
     defaulted   - unknown type; mapped by guessing (a bug, surfaced loudly)
 """
+
 from __future__ import annotations
 
 import json

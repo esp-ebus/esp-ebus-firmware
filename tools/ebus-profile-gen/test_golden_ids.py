@@ -290,32 +290,15 @@ def expect_inheritance_resolution() -> None:
         child = os.path.join(tmp, "child.tsp")
 
         with open(parent_a, "w", encoding="utf-8") as f:
-            f.write(
-                "@base(MF, 0x09, 0x01)\n"
-                "model Shared {\n"
-                "  inherited_a: UCH;\n"
-                "}\n"
-            )
+            f.write("@base(MF, 0x09, 0x01)\nmodel Shared {\n  inherited_a: UCH;\n}\n")
         with open(parent_b, "w", encoding="utf-8") as f:
-            f.write(
-                "@base(MF, 0x09, 0x02)\n"
-                "model Shared {\n"
-                "  inherited_b: UCH;\n"
-                "}\n"
-            )
+            f.write("@base(MF, 0x09, 0x02)\nmodel Shared {\n  inherited_b: UCH;\n}\n")
         with open(child, "w", encoding="utf-8") as f:
-            f.write(
-                "@inherit(Shared)\n"
-                "model Child {\n"
-                "  own: UCH;\n"
-                "}\n"
-            )
+            f.write("@inherit(Shared)\nmodel Child {\n  own: UCH;\n}\n")
 
         log = ConversionLog(level="error")
         raw = tsp_parser.TspParser([parent_a, parent_b, child], log=log).parse()
-        child_register = next(
-            reg for reg in raw["registers"] if reg["name"] == "Child"
-        )
+        child_register = next(reg for reg in raw["registers"] if reg["name"] == "Child")
 
         _checks += 1
         if not child_register.get("unsupported"):
@@ -325,7 +308,8 @@ def expect_inheritance_resolution() -> None:
 
         _checks += 1
         errors = [
-            rec for rec in log.records
+            rec
+            for rec in log.records
             if rec.get("severity") == "error"
             and rec.get("action") == "ambiguous_inherit_parent"
         ]
@@ -512,9 +496,7 @@ def expect_unit_profile_mappings() -> None:
                 ),
                 CommandIR(
                     name="FloatPercent",
-                    fields=[
-                        FieldIR(name="value", ebus_type="FLOAT32", unit="%")
-                    ],
+                    fields=[FieldIR(name="value", ebus_type="FLOAT32", unit="%")],
                 ),
                 CommandIR(
                     name="DataKelvin",
@@ -610,7 +592,7 @@ def main() -> int:
                 "model ReadOnly {\n"
                 "  value: UCH;\n"
                 "}\n"
-                "@condition(Id.Id.sw, \">=123\")\n"
+                '@condition(Id.Id.sw, ">=123")\n'
                 "@id(MF, 0x05)\n"
                 "model Conditional {\n"
                 "  value: UCH;\n"
@@ -622,41 +604,38 @@ def main() -> int:
         for name, predicate, expected in (
             (
                 "SourceWrite",
-                lambda r: r["rw"] == "write"
-                and r["meta"].get("write_to_source") is True
-                and "write_nn" not in r["meta"],
+                lambda r: (
+                    r["rw"] == "write"
+                    and r["meta"].get("write_to_source") is True
+                    and "write_nn" not in r["meta"]
+                ),
                 True,
             ),
             (
                 "Chained",
-                lambda r: r["unsupported"]
-                and "@chain" in r["unsupported_reason"],
+                lambda r: r["unsupported"] and "@chain" in r["unsupported_reason"],
                 True,
             ),
             (
                 "SourceAddress",
-                lambda r: r["unsupported"]
-                and "@qq" in r["unsupported_reason"],
+                lambda r: r["unsupported"] and "@qq" in r["unsupported_reason"],
                 True,
             ),
             (
                 "ReadOnly",
-                lambda r: r["rw"] == "read"
-                and r["meta"].get("readonly") is True,
+                lambda r: r["rw"] == "read" and r["meta"].get("readonly") is True,
                 True,
             ),
             (
                 "Conditional",
-                lambda r: r["unsupported"]
-                and "condition" in r["unsupported_reason"],
+                lambda r: r["unsupported"] and "condition" in r["unsupported_reason"],
                 True,
             ),
         ):
             _checks += 1
             if name not in registers or predicate(registers[name]) != expected:
                 _failures.append(
-                    f"decorator semantics {name}: "
-                    f"got {registers.get(name)!r}"
+                    f"decorator semantics {name}: got {registers.get(name)!r}"
                 )
 
         fam = mapper.build_profiles_and_commands(raw, log=NULL_LOG)

@@ -527,9 +527,7 @@ class TspParser:
                 for i in pool
             ]
             child["unsupported"] = True
-            child["unsupported_reason"] = (
-                f"ambiguous @inherit parent {parent_name!r}"
-            )
+            child["unsupported_reason"] = f"ambiguous @inherit parent {parent_name!r}"
             self.log.error(
                 "parse",
                 f"ambiguous @inherit parent {parent_name!r}; "
@@ -602,8 +600,15 @@ class TspParser:
                         continue
                     pmeta = parent["meta"]
                     # zz/mf/pb form the shared addressing prefix.
-                    for k in ("zz", "mf", "pb", "readonly", "chain",
-                              "condition", "condition_ext"):
+                    for k in (
+                        "zz",
+                        "mf",
+                        "pb",
+                        "readonly",
+                        "chain",
+                        "condition",
+                        "condition_ext",
+                    ):
                         if k not in meta and k in pmeta:
                             meta[k] = pmeta[k]
                             changed = True
@@ -681,7 +686,8 @@ class TspParser:
             if decorators:
                 merged["decorators"] = decorators
                 directions = [
-                    dec["name"] for dec in decorators
+                    dec["name"]
+                    for dec in decorators
                     if dec.get("name") in ("in", "out")
                 ]
                 if len(set(directions)) > 1:
@@ -760,9 +766,7 @@ class TspParser:
             namespace = ns_map.get(lineno, "")
 
             # Skip using/import/namespace/union statements
-            if (
-                line.startswith(("using ", 'import "', "namespace ", "union "))
-            ):
+            if line.startswith(("using ", 'import "', "namespace ", "union ")):
                 i += 1
                 continue
 
@@ -1615,7 +1619,9 @@ class TspParser:
                         register["meta"]["qq"] = v
                     else:
                         register["unsupported"] = True
-                        register["unsupported_reason"] = "@qq source address is unresolved"
+                        register["unsupported_reason"] = (
+                            "@qq source address is unresolved"
+                        )
                 register["unsupported"] = True
                 register["unsupported_reason"] = (
                     "@qq source addressing is unsupported by firmware schema"

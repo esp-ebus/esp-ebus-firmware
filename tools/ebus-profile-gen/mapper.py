@@ -751,11 +751,23 @@ def _map_profile_name(
     # Seconds
     if unit_lower in ("s", "sec", "second", "seconds"):
         if datatype == "UINT8":
-            return f"uint8_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint8_s"
+            return (
+                f"uint8_s_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "uint8_s"
+            )
         if datatype == "UINT16":
-            return f"uint16_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint16_s"
+            return (
+                f"uint16_s_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "uint16_s"
+            )
         if datatype == "UINT32":
-            return f"uint32_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint32_s"
+            return (
+                f"uint32_s_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "uint32_s"
+            )
 
     # Kelvin
     if unit_lower == "k" and datatype.startswith(("DATA", "INT", "UINT", "FLOAT")):
@@ -767,10 +779,7 @@ def _map_profile_name(
     unit_profile_base = UNIT_PROFILE_BASES.get((datatype, unit_lower))
     if unit_profile_base:
         if divider != 1:
-            return (
-                f"{unit_profile_base}_div"
-                f"{format(divider, 'g').replace('.', 'p')}"
-            )
+            return f"{unit_profile_base}_div{format(divider, 'g').replace('.', 'p')}"
         return unit_profile_base
 
     # Basic type fallback
@@ -992,9 +1001,7 @@ def _semantic_ha_profile(field: FieldIR, rw: str, command_name: str = "") -> str
     )
     name_tokens = set(re.findall(r"[a-z0-9]+", semantic_name.lower()))
     if unit in ("%", "percent"):
-        if "rh" in name_tokens or any(
-            "humid" in token for token in name_tokens
-        ):
+        if "rh" in name_tokens or any("humid" in token for token in name_tokens):
             return "sensor_humidity"
         return ""
 
@@ -1303,14 +1310,34 @@ def commands_to_flat_entries(
             zz = default_zz if default_zz is not None else 0x08
         if meta.get("write_to_source"):
             valid_source = {
-                0x00, 0x01, 0x03, 0x07, 0x0f,
-                0x10, 0x11, 0x13, 0x17, 0x1f,
-                0x30, 0x31, 0x33, 0x37, 0x3f,
-                0x70, 0x71, 0x73, 0x77, 0x7f,
-                0xf0, 0xf1, 0xf3, 0xf7, 0xff,
+                0x00,
+                0x01,
+                0x03,
+                0x07,
+                0x0F,
+                0x10,
+                0x11,
+                0x13,
+                0x17,
+                0x1F,
+                0x30,
+                0x31,
+                0x33,
+                0x37,
+                0x3F,
+                0x70,
+                0x71,
+                0x73,
+                0x77,
+                0x7F,
+                0xF0,
+                0xF1,
+                0xF3,
+                0xF7,
+                0xFF,
             }
             if zz not in valid_source:
-                source_zz = (zz - 5) & 0xff
+                source_zz = (zz - 5) & 0xFF
                 if source_zz in valid_source:
                     zz = source_zz
                 else:
@@ -1651,9 +1678,7 @@ def build_profiles_and_commands(
             )
         return t, meta
 
-    def _lookup_model(
-        type_name: str, namespace: str | None = None
-    ) -> dict[str, Any]:
+    def _lookup_model(type_name: str, namespace: str | None = None) -> dict[str, Any]:
         """Look up a model by name, preferring namespace-qualified keys.
 
         With the fix for namespace collisions, models are stored with qualified
@@ -2047,14 +2072,9 @@ def build_profiles_and_commands(
             rw = reg.get("rw", "read")
 
         before_filter = list(field_irs)
-        field_irs = [
-            f
-            for f in before_filter
-            if _field_included_for_direction(f, rw)
-        ]
+        field_irs = [f for f in before_filter if _field_included_for_direction(f, rw)]
         conflicts = [
-            f.name for f in before_filter
-            if (f.meta or {}).get("direction_conflict")
+            f.name for f in before_filter if (f.meta or {}).get("direction_conflict")
         ]
         for f in before_filter:
             if f not in field_irs:

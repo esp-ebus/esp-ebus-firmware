@@ -33,18 +33,14 @@ UNIT_ASSIGNMENTS = (
 class SemanticHAProfileTests(unittest.TestCase):
     def test_read_units_map_to_registered_sensor_profiles(self):
         profiles = json.loads(
-            (ROOT / "profiles" / "ha_profiles.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "profiles" / "ha_profiles.json").read_text(encoding="utf-8")
         )
         profile_names = {profile["name"] for profile in profiles}
 
         for unit, name in UNIT_ASSIGNMENTS:
             with self.subTest(unit=unit):
                 field = FieldIR(name="reading", unit=unit)
-                self.assertEqual(
-                    mapper._semantic_ha_profile(field, "read"), name
-                )
+                self.assertEqual(mapper._semantic_ha_profile(field, "read"), name)
                 self.assertIn(name, profile_names)
 
     def test_writes_are_not_mislabeled_as_read_sensors(self):
@@ -62,9 +58,7 @@ class SemanticHAProfileTests(unittest.TestCase):
             mapper._semantic_ha_profile(humidity, "read"),
             "sensor_humidity",
         )
-        self.assertEqual(
-            mapper._semantic_ha_profile(total, "read"), "sensor_total"
-        )
+        self.assertEqual(mapper._semantic_ha_profile(total, "read"), "sensor_total")
 
     def test_only_ordered_boolean_enums_become_switches_or_binary_sensors(self):
         on_off = [
@@ -72,15 +66,11 @@ class SemanticHAProfileTests(unittest.TestCase):
             {"key": "on", "value": 1},
         ]
         profiles = json.loads(
-            (ROOT / "profiles" / "ha_profiles.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "profiles" / "ha_profiles.json").read_text(encoding="utf-8")
         )
         profile_names = {profile["name"] for profile in profiles}
         field = FieldIR(name="status", meta={"values": on_off})
-        self.assertEqual(
-            mapper._semantic_ha_profile(field, "read"), "binary_sensor"
-        )
+        self.assertEqual(mapper._semantic_ha_profile(field, "read"), "binary_sensor")
         self.assertEqual(mapper._semantic_ha_profile(field, "write"), "switch")
         self.assertIn("switch", profile_names)
 
@@ -129,12 +119,8 @@ class SemanticHAProfileTests(unittest.TestCase):
         self.assertEqual(result[0]["fields"][0]["ha_profile"], "binary_sensor")
 
     def test_bit_fields_remain_binary_sensors(self):
-        field = FieldIR(
-            name="status", meta={"bits": {"active": 0, "fault": 1}}
-        )
-        self.assertEqual(
-            mapper._semantic_ha_profile(field, "read"), "binary_sensor"
-        )
+        field = FieldIR(name="status", meta={"bits": {"active": 0, "fault": 1}})
+        self.assertEqual(mapper._semantic_ha_profile(field, "read"), "binary_sensor")
 
     def test_generated_fields_use_semantic_unit_profile(self):
         family = FamilyIR(
@@ -154,9 +140,7 @@ class SemanticHAProfileTests(unittest.TestCase):
             ]
         )
         result = mapper.commands_to_flat_entries(family)
-        self.assertEqual(
-            result[0]["fields"][0]["ha_profile"], "sensor_temperature"
-        )
+        self.assertEqual(result[0]["fields"][0]["ha_profile"], "sensor_temperature")
 
 
 if __name__ == "__main__":

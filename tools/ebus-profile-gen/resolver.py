@@ -1,4 +1,5 @@
 """Include/template resolution for .tsp files."""
+
 from __future__ import annotations
 
 import os
@@ -14,9 +15,7 @@ _TYPESPEC_IMPORT = "@ebusd/ebus-typespec"
 class IncludeResolver:
     def __init__(self, ebusd_root: str, typespec_root: str | None = None):
         self.ebusd_root = os.path.abspath(ebusd_root)
-        self.typespec_root = (
-            os.path.abspath(typespec_root) if typespec_root else None
-        )
+        self.typespec_root = os.path.abspath(typespec_root) if typespec_root else None
 
     def resolve(self, tsp_path: str) -> list[str]:
         """Resolve tsp_path and its transitive includes relative to ebusd_root.

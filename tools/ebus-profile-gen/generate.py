@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate ebus profile/command JSON from a TypeSpec (.tsp) file."""
+
 from __future__ import annotations
 
 import argparse
@@ -21,9 +22,13 @@ from convlog import ConversionLog
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="ebus-profile-configuration TSP → data profiles generator")
+    p = argparse.ArgumentParser(
+        description="ebus-profile-configuration TSP → data profiles generator"
+    )
     p.add_argument("--ebusd-root", default="tools/ebus-profile-gen/ebusd-configuration")
-    p.add_argument("--ebus-typespec-root", default="tools/ebus-profile-gen/ebus-typespec")
+    p.add_argument(
+        "--ebus-typespec-root", default="tools/ebus-profile-gen/ebus-typespec"
+    )
     p.add_argument("tsp_file", help="tsp path relative to ebusd-root or absolute")
     p.add_argument(
         "--zz",
@@ -60,7 +65,9 @@ def main() -> int:
         ebusd_root = os.path.abspath(os.path.join(repo_root, ebusd_root))
     ebus_typespec_root = args.ebus_typespec_root
     if not os.path.isabs(ebus_typespec_root):
-        ebus_typespec_root = os.path.abspath(os.path.join(repo_root, ebus_typespec_root))
+        ebus_typespec_root = os.path.abspath(
+            os.path.join(repo_root, ebus_typespec_root)
+        )
 
     tsp_rel = args.tsp_file
     if not tsp_rel:
@@ -89,7 +96,9 @@ def main() -> int:
     gen_dir = args.out_generated or os.path.join(
         repo_root, "tools", "ebus-profile-gen", "generated"
     )
-    profiles_path = args.out_profiles or os.path.join(gen_dir, f"{tsp_stem}.profiles.json")
+    profiles_path = args.out_profiles or os.path.join(
+        gen_dir, f"{tsp_stem}.profiles.json"
+    )
     commands_path = args.out_commands or os.path.join(gen_dir, f"{tsp_stem}.json")
 
     # Structured conversion log
@@ -170,8 +179,12 @@ def main() -> int:
     em.emit_profiles(profiles_entries)
     em.emit_commands(commands_entries)
 
-    log.info("emit", "profiles written", path=profiles_path, count=len(profiles_entries))
-    log.info("emit", "commands written", path=commands_path, count=len(commands_entries))
+    log.info(
+        "emit", "profiles written", path=profiles_path, count=len(profiles_entries)
+    )
+    log.info(
+        "emit", "commands written", path=commands_path, count=len(commands_entries)
+    )
 
     # Write the conversion log and print a summary.
     log.write()
@@ -225,9 +238,14 @@ def _print_summary(log: ConversionLog, log_path: str) -> None:
                 or rec.get("model")
                 or ""
             )
-            print(f"  [{rec.get('stage')}] {rec.get('reason')} — {target}", file=sys.stderr)
+            print(
+                f"  [{rec.get('stage')}] {rec.get('reason')} — {target}",
+                file=sys.stderr,
+            )
         if len(records) > 10:
-            print(f"  ... and {len(records) - 10} more (see {log_path})", file=sys.stderr)
+            print(
+                f"  ... and {len(records) - 10} more (see {log_path})", file=sys.stderr
+            )
 
 
 if __name__ == "__main__":

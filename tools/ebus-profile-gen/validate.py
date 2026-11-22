@@ -99,9 +99,7 @@ def validate_log_entries(
                 if action in ("ambiguous_inherit_parent",)
                 else EMITTED_OUTPUT
             )
-            issues.append(
-                _issue(category, "conversion-error", f"[{stage}] {reason}")
-            )
+            issues.append(_issue(category, "conversion-error", f"[{stage}] {reason}"))
 
         classification = rec.get("classification")
         if classification == "defaulted":

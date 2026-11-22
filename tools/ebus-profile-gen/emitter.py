@@ -1,4 +1,5 @@
 """Emit raw generated JSON output (gitignored)."""
+
 from __future__ import annotations
 
 import json
