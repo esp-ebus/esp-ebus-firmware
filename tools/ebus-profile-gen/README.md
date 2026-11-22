@@ -187,6 +187,9 @@ Important boundaries:
 - Profile mappings cover only recognized type/unit/scaling combinations.
   `ha_profile` defaults to empty; bit-map fields are assigned
   `binary_sensor`.
+- Unit-aware mappings include temperature/K, minutes, seconds, kWh,
+  percentage, RPM, and hours variants used by the corpus. Remaining unit
+  combinations fall back to datatype profiles.
 - Command names use the upstream TypeSpec model name verbatim. The
   slash-based hierarchy in hand-curated `config/*.json` files is not generated.
 

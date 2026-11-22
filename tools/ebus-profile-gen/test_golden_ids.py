@@ -484,6 +484,61 @@ def expect_unit_profile_mappings() -> None:
                         )
                     ],
                 ),
+                CommandIR(
+                    name="Uint8Minutes",
+                    fields=[FieldIR(name="value", ebus_type="UINT8", unit="min")],
+                ),
+                CommandIR(
+                    name="Uint8Seconds",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="UINT8",
+                            unit="s",
+                            factor="10",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="FloatKWh",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="FLOAT32",
+                            unit="kWh",
+                            factor="1000",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="FloatPercent",
+                    fields=[
+                        FieldIR(name="value", ebus_type="FLOAT32", unit="%")
+                    ],
+                ),
+                CommandIR(
+                    name="DataKelvin",
+                    fields=[FieldIR(name="value", ebus_type="DATA2C", unit="K")],
+                ),
+                CommandIR(
+                    name="FloatKelvin",
+                    fields=[FieldIR(name="value", ebus_type="FLOAT32", unit="K")],
+                ),
+                CommandIR(
+                    name="Uint16KWh",
+                    fields=[
+                        FieldIR(
+                            name="value",
+                            ebus_type="UINT16",
+                            unit="kWh",
+                            factor="10",
+                        )
+                    ],
+                ),
+                CommandIR(
+                    name="Int16Rpm",
+                    fields=[FieldIR(name="value", ebus_type="INT16", unit="rpm")],
+                ),
             ]
         )
         profiles = mapper.profiles_to_flat_entries(family, log=NULL_LOG)
@@ -500,6 +555,14 @@ def expect_unit_profile_mappings() -> None:
             "HalfScaledSignedTemperature": ("int16_celsius_div2", 2),
             "ReverseSignedTemperature": ("int16r_celsius_div10", 10),
             "ScaledDataTemperature": ("data2c_celsius_div16", 16),
+            "Uint8Minutes": ("uint8_min", 1),
+            "Uint8Seconds": ("uint8_s_div10", 10),
+            "FloatKWh": ("float32_kwh_div1000", 1000),
+            "FloatPercent": ("float32_percent", 1),
+            "DataKelvin": ("data2c_kelvin", 1),
+            "FloatKelvin": ("float32_kelvin", 1),
+            "Uint16KWh": ("uint16_kwh_div10", 10),
+            "Int16Rpm": ("int16_rpm", 1),
         }
         for command_name, (profile_name, divider) in expected.items():
             field_profile = command_by_name[command_name]["fields"][0]["profile"]

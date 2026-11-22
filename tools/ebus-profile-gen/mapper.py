@@ -616,8 +616,24 @@ def _map_profile_name(
     if unit_lower in ("%", "percent"):
         if datatype == "INT16":
             return "int16_percent"
+        if datatype == "INT16R":
+            return (
+                f"int16r_percent_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "int16r_percent"
+            )
         if datatype == "UINT8":
             return "uint8_percent"
+        if datatype == "UINT16":
+            return "uint16_percent"
+        if datatype == "UINT16R":
+            return "uint16r_percent"
+        if datatype == "DATA1C":
+            return "data1c_percent"
+        if datatype == "DATA2C":
+            return "data2c_percent"
+        if datatype == "FLOAT32":
+            return "float32_percent"
         if datatype == "INT8":
             return "int8_percent_div10"
 
@@ -632,6 +648,18 @@ def _map_profile_name(
     if unit_lower == "kwh":
         if datatype == "UINT32":
             return "uint32_kwh"
+        if datatype == "UINT16":
+            return (
+                f"uint16_kwh_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "uint16_kwh"
+            )
+        if datatype == "FLOAT32":
+            return (
+                f"float32_kwh_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "float32_kwh"
+            )
 
     # Flow rate
     if unit_lower in ("l/min", "lpm"):
@@ -650,6 +678,12 @@ def _map_profile_name(
             return "uint32_hour"
         if datatype == "UINT16":
             return "uint16_hour"
+        if datatype == "UINT8":
+            return (
+                f"uint8_h_div{format(divider, 'g').replace('.', 'p')}"
+                if divider != 1
+                else "uint8_h"
+            )
 
     if unit_lower == "min" or unit_lower == "minute":
         if datatype == "UINT16":
@@ -659,6 +693,41 @@ def _map_profile_name(
     if unit_lower == "rpm":
         if datatype == "UINT16":
             return "uint16_rpm"
+        if datatype == "INT16":
+            return "int16_rpm"
+        if datatype == "UINT8":
+            return "uint8_rpm"
+        if datatype == "FLOAT32":
+            return "float32_rpm"
+
+    # Minutes
+    if unit_lower in ("min", "minute"):
+        if divider == 1:
+            if datatype == "UINT8":
+                return "uint8_min"
+            if datatype == "UINT32":
+                return "uint32_min"
+            if datatype == "UINT16":
+                return "uint16_min"
+        if datatype == "UINT8" and divider == 5:
+            return "uint8_min_div5"
+
+    # Seconds
+    if unit_lower in ("s", "sec", "second", "seconds"):
+        if datatype == "UINT8":
+            return f"uint8_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint8_s"
+        if datatype == "UINT16":
+            return f"uint16_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint16_s"
+        if datatype == "UINT32":
+            return f"uint32_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint32_s"
+
+    # Kelvin
+    if unit_lower == "k":
+        if datatype.startswith(("DATA", "INT", "UINT", "FLOAT")):
+            name = f"{datatype.lower()}_kelvin"
+            if divider != 1:
+                name += f"_div{format(divider, 'g').replace('.', 'p')}"
+            return name
 
     # Basic type fallback
     basic_map = {
