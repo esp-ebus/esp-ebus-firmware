@@ -43,6 +43,10 @@ an error / drops the message; the telegram is never partially sent):
   expansion prefixes the parent name: `value_ign`, `value_ign_1`):
   omitted keys with those names are auto-padded with `0x00` of the profile
   datatype's width. Explicit values for them are accepted and used as-is.
+- **Fields carrying a `const` value are never client input**: the fixed
+  wire bytes (≤16, emitted from TypeSpec `@constValue`, e.g.
+  `wTimeSlotConst = ffff`) are padded automatically, and a payload that
+  supplies such a key is rejected.
 - **Ranges**: the encoded number must fall inside the field's
   `min`/`max` (profile defaults, per-field overrides in the command).
   A `max` of `0` means *no upper bound* (profiles whose TypeSpec

@@ -279,7 +279,10 @@ def expect_profile_metadata(
 
 
 def expect_distinct_profile_refs(
-    commands: List[Dict[str, Any]], first_name: str, second_name: str
+    commands: list[dict[str, Any]],
+    first_name: str,
+    second_name: str,
+    field_name: str,
 ) -> None:
     """Assert metadata variants reference distinct generated profiles."""
     global _checks
@@ -287,7 +290,13 @@ def expect_distinct_profile_refs(
     try:
         first = next(c for c in commands if c["name"] == first_name)
         second = next(c for c in commands if c["name"] == second_name)
-        assert first["fields"][0]["profile"] != second["fields"][0]["profile"], (
+        first_profile = next(
+            f["profile"] for f in first["fields"] if f["name"] == field_name
+        )
+        second_profile = next(
+            f["profile"] for f in second["fields"] if f["name"] == field_name
+        )
+        assert first_profile != second_profile, (
             f"{first_name} and {second_name} share a profile despite different metadata"
         )
     except (AssertionError, StopIteration) as exc:
@@ -510,6 +519,7 @@ def main() -> int:
         t392,
         "CcTimer_Monday",
         [
+            "ign",
             "value_slot1_slot_from",
             "value_slot1_slot_to",
             "value_slot1_slot_1_from",
@@ -519,8 +529,8 @@ def main() -> int:
             "value_daysel",
         ],
     )
-    expect_positions(t392, "CcTimer_Monday", [1, 2, 3, 4, 5, 6, 7])
-    expect_fields(ehp, "PhaseStatus", ["value_phase"])
+    expect_positions(t392, "CcTimer_Monday", [1, 2, 3, 4, 5, 6, 7, 8])
+    expect_fields(ehp, "PhaseStatus", ["ign", "value_phase"])
     expect_bits(
         ehp,
         "PhaseStatus",
@@ -593,6 +603,36 @@ def main() -> int:
     expect_positions(bai, "NightTimeOffset", [1, 8])
     ctlv2_ids = entries_for("src/vaillant/15.ctlv2.tsp")
     expect_positions(ctlv2_ids, "HwcTimer_Monday0", [1, 2, 4, 6])
+
+    # @inherit contributes payload fields as well as addressing: inherited
+    # const payloads are retained, and inherited read fillers keep offsets.
+    hmu = entries_for("src/vaillant/08.hmu.tsp")
+    expect(hmu, "EnableTestEEVPosition", "", "b5140515")
+    expect_fields(hmu, "EnableTestEEVPosition", ["ignore"])
+    expect_fields(hmu, "TestEEVPosition", ["ign", "value"])
+    expect_positions(hmu, "TestEEVPosition", [1, 3])
+    expect_fields(hmu, "TestEEVTemp", ["ign", "sin"])
+    expect_positions(hmu, "TestEEVTemp", [1, 3])
+
+    # @constValue reaches commands as fixed wire bytes (`const`).
+    vai_profiles, vai_commands = profile_outputs_for("src/vaillant/15.vai.tsp")
+    expect_profile_metadata(
+        vai_profiles,
+        vai_commands,
+        "Time",
+        {"const": "00"},
+        {},
+        field_name="value_ign",
+    )
+    hmu_profiles, hmu_commands = profile_outputs_for("src/vaillant/08.hmu.tsp")
+    expect_profile_metadata(
+        hmu_profiles,
+        hmu_commands,
+        "EnableTestEEVPosition",
+        {"const": "03ffff"},
+        {},
+        field_name="ignore",
+    )
     bai_profiles, bai_commands = profile_outputs_for(
         "src/vaillant/bai.0010021901_inc.tsp"
     )
@@ -614,6 +654,7 @@ def main() -> int:
         "CylinderChargeHyst",
         {"min": 3, "max": 20},
         {"unit": "K", "digits": 1, "min": 3, "max": 20},
+        field_name="value",
     )
     expect_profile_metadata(
         ctlv2_profiles,
@@ -621,9 +662,18 @@ def main() -> int:
         "CylinderChargeOffset",
         {"min": 0, "max": 40},
         {"unit": "K", "digits": 0, "min": 0, "max": 40},
+        field_name="value",
     )
     expect_distinct_profile_refs(
-        ctlv2_commands, "CylinderChargeHyst", "CylinderChargeOffset"
+        ctlv2_commands, "CylinderChargeHyst", "CylinderChargeOffset", "value"
+    )
+    expect_profile_metadata(
+        ctlv2_profiles,
+        ctlv2_commands,
+        "HwcTimer_Monday",
+        {"const": "ffff"},
+        {},
+        field_name="value_wTimeSlotConst",
     )
     expect_unit_profile_mappings()
 
@@ -642,6 +692,7 @@ def main() -> int:
         "ActualEnvironmentPowerFine",
         {},
         {"unit": "kW", "divider": 10.0, "digits": 0, "min": 0, "max": 0},
+        field_name="value",
     )
 
     if _failures:

@@ -71,7 +71,7 @@ By default the CLI writes raw generated output to `tools/ebus-profile-gen/genera
 
 - `<tsp_stem>.profiles.json` — flat entries `{name, datatype, unit, divider, digits, min, max}` matching the `profiles/data_profiles.json` schema. These can be copied to `profiles/data_profiles_user.json` (the overlay) at compile time.
 - `<tsp_stem>.json` — command entries matching `config/simulation.json` schema:
-  `{key, name, zz, pbsb, [dx], [nn], wpbsb, [wdx], interval, master, fields: [{name, profile, position, ha_profile, [bits]}]}`.
+  `{key, name, zz, pbsb, [dx], [nn], wpbsb, [wdx], interval, master, fields: [{name, profile, position, ha_profile, [bits], [const]}]}`.
   `wpbsb`/`wdx` are omitted for read-only commands, `interval` defaults to 0 (passive only), `master` defaults to false, `ha_profile` is empty — fill these in by hand (exception: fields carrying a `bits` map get `ha_profile: "binary_sensor"` automatically — one HA binary_sensor per bit).
   `bits` appears on byte-grouped bitfield fields (consecutive `BI0`–`BI7` children collapsed into one `UINT8` byte) as a map of sub-field name to bit index within that byte.
   `zz` is the destination byte. An explicit `@zz` on the command or an
@@ -94,6 +94,14 @@ By default the CLI writes raw generated output to `tools/ebus-profile-gen/genera
       `52.mc2.mc.4_050` — so keys stay unique per (slave, file, id) even when
       different units carry registers of the same name (see
       `config/README.md`). Use `--key-prefix` to override the default prefix.
+  `const` is a fixed wire-byte hex value from `@constValue`; the firmware
+  auto-pads it on writes and rejects client-supplied values for that field.
+
+`@inherit` resolves both addressing and payload fields. Parent fields are
+combined in decorator order, followed by fields declared on the child.
+Same-name fields override in place (child metadata wins), allowing generic
+parent fields to be specialized without duplicating a wire field. Inherited
+fillers and constants therefore retain their byte positions and write bytes.
 
 This directory is **gitignored** — raw output never gets committed by accident.
 
@@ -161,6 +169,8 @@ python3 tools/ebus-profile-gen/generate.py \
 - Field-level `@unit`, `@factor`/`@divisor`, `@step`, `@minValue`, and
   `@maxValue` metadata reaches profiles; min/max also become command-field
   overrides
+- `@inherit` resolves payload fields and metadata as well as read/write
+  addressing, including inherited fillers and `@constValue`
 - Type mapping from TypeSpec types to project datatypes (partial)
 - JSON output generation
 - Decorator capture for all models (including those with bodies)

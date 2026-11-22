@@ -113,6 +113,7 @@ upload).
 | `bits` | object | no | Bit-name map: `{ "enable": 0, "fault": 1, … }` — names → bit indices, dense from 0, at most 8. The field's byte expands into one value/topic/HA binary sensor per bit. |
 | `raw` | bool | no | Skip sentinel-to-null mapping and always render the raw number — see [`doc/datatype_mapping.md`](datatype_mapping.md). |
 | `min` / `max` | number | no | Per-field plausibility/writing range overrides, stored per command key — see [`doc/datatype_mapping.md`](datatype_mapping.md). |
+| `const` | hex string | no | Fixed wire bytes (≤16) the field always carries. Never client input: writes pad these bytes, a provided value rejects the payload. Emitted from TypeSpec `@constValue`. |
 
 Field order in JSON does not matter at write time: multi-field write
 payloads are encoded in ascending `position` order, and positions must

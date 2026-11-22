@@ -838,6 +838,69 @@ def _max_length_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[int]:
         return None
 
 
+def _decorator_meta(decorators: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Metadata contributed by a field's decorators.
+
+    Shared by register fields and composite (plain-model) children so both
+    paths interpret `@constValue`, `@maxLength`, `@minValue`, ... alike.
+    """
+    meta: Dict[str, Any] = {}
+    for dec in decorators:
+        name = dec.get("name", "")
+        args = dec.get("args") or []
+        if name == "unit" and args:
+            meta["unit"] = args[0].strip('"').strip("'")
+        elif name in ("factor", "divisor") and args:
+            meta["factor"] = args[0]
+        elif name == "step" and args:
+            s = args[0].strip()
+            try:
+                float(s)
+                meta["digits"] = len(s.split(".")[1].rstrip("0")) if "." in s else 0
+            except ValueError:
+                pass
+        elif name in ("minValue", "maxValue") and args:
+            key = "min" if name == "minValue" else "max"
+            try:
+                meta[key] = int(args[0])
+            except ValueError:
+                try:
+                    meta[key] = float(args[0])
+                except ValueError:
+                    pass
+        elif name == "constValue" and args:
+            meta["const_value"] = args[0]
+        elif name == "maxLength" and args:
+            meta["max_length"] = args[0]
+    return meta
+
+
+def _const_wire_hex(field: FieldIR) -> str:
+    """Render a field's @constValue as its wire bytes (lowercase hex).
+
+    HEX fields carry their literal bytes; numeric and char types are packed
+    with the datatype width and endianness. Returns "" when the field has no
+    const or the literal cannot be interpreted.
+    """
+    raw = (field.meta or {}).get("const_value")
+    if raw is None or str(raw).strip() == "":
+        return ""
+    text = str(raw).strip().strip('"').strip("'")
+    datatype = field.our_datatype or ""
+    if datatype.startswith("HEX"):
+        return text.lower()
+    size = DATATYPE_SIZE.get(datatype)
+    try:
+        number = int(text, 16) if re.match(r"^[+-]?0[xX]", text) else int(text, 10)
+    except ValueError:
+        return text.lower()
+    if not size:
+        return text.lower()
+    number &= (1 << (size * 8)) - 1
+    order = "big" if datatype.endswith("R") else "little"
+    return number.to_bytes(size, order).hex()
+
+
 def _format_command_name(model_name: str, namespace: str = "") -> str:
     """Format a command name from model name and namespace.
 
@@ -1091,6 +1154,18 @@ def commands_to_flat_entries(
                 field_entry["max"] = max_val
             if f.meta.get("bits"):
                 field_entry["bits"] = f.meta["bits"]
+            const_hex = _const_wire_hex(f)
+            if const_hex:
+                field_entry["const"] = const_hex
+                log.info(
+                    "command",
+                    "command field const emitted",
+                    action="const_field_emitted",
+                    name=f.name,
+                    input_type=f.ebus_type,
+                    datatype=f.our_datatype or "",
+                    const=const_hex,
+                )
 
             fields.append(field_entry)
 
@@ -1374,7 +1449,12 @@ def build_profiles_and_commands(
                 )
                 continue
             resolved_type, type_meta = resolve_type_and_meta(child_type)
-            merged_meta = dict(type_meta)
+            merged_meta = {
+                **type_meta,
+                **_decorator_meta(child.get("decorators") or []),
+            }
+            if child.get("meta"):
+                merged_meta.update(child["meta"])
             leaf_name = "_".join([parent_name] + path + [child_name])
             while "__" in leaf_name:
                 leaf_name = leaf_name.replace("__", "_")
@@ -1618,41 +1698,9 @@ def build_profiles_and_commands(
                 if f.get("factor"):
                     merged_meta["factor"] = f["factor"]
 
-                # If field has its own decorators, extract metadata from them
-                for dec in f_decorators:
-                    dname = dec.get("name", "")
-                    args = dec.get("args", [])
-
-                    if dname == "unit" and args:
-                        merged_meta["unit"] = args[0].strip('"').strip("'")
-                    elif dname == "factor" and args:
-                        merged_meta["factor"] = args[0]
-                    elif dname == "divisor" and args:
-                        merged_meta["factor"] = args[0]
-                    elif dname == "step" and args:
-                        s = args[0].strip()
-                        try:
-                            step_float = float(s)
-                            if "." in s:
-                                merged_meta["digits"] = len(s.split(".")[1].rstrip("0"))
-                        except ValueError:
-                            pass
-                    elif dname == "minValue" and args:
-                        try:
-                            merged_meta["min"] = int(args[0])
-                        except ValueError:
-                            try:
-                                merged_meta["min"] = float(args[0])
-                            except ValueError:
-                                pass
-                    elif dname == "maxValue" and args:
-                        try:
-                            merged_meta["max"] = int(args[0])
-                        except ValueError:
-                            try:
-                                merged_meta["max"] = float(args[0])
-                            except ValueError:
-                                pass
+                # Field decorators contribute metadata (const, maxLength,
+                # unit, limits); shared with composite expansion.
+                merged_meta.update(_decorator_meta(f_decorators))
 
                 # Determine signedness
                 signed = resolved_type.startswith(("S", "s"))

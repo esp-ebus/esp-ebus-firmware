@@ -21,6 +21,7 @@ Supported constructs:
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -350,6 +351,21 @@ def _parse_decorator_args(args_str: Optional[str]) -> List[str]:
     return args
 
 
+def _raw_model_field(
+    name: str, type_name: str, decorators: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Raw {name, type} pair for the models registry, keeping decorators.
+
+    Composite expansion (mapper.expand_composite_field) resolves metadata
+    from these pairs, so decorators must survive here (`@constValue`,
+    `@maxLength`, ...); without them they are silently dropped.
+    """
+    field: Dict[str, Any] = {"name": name, "type": type_name}
+    if decorators:
+        field["decorators"] = decorators
+    return field
+
+
 def _split_leading_decorators(line: str) -> Tuple[List[Dict[str, Any]], str]:
     """Split leading ``@name(args)`` tokens off a source line.
 
@@ -451,10 +467,10 @@ class TspParser:
             ns_map = _namespace_map(lines)
             self._parse_lines(lines, ir, fpath, aliases, ns_map)
 
-        # Post-process: resolve @inherit chains and derive per-direction
-        # id/wid tails. read_tail/write_tail hold the D bytes contributed
-        # by @base and inherited ancestors; a register's own @ext bytes
-        # are appended by the mapper at emission time.
+        # Post-process: resolve @inherit chains, derive per-direction id/wid
+        # tails, and assemble effective payload fields. read_tail/write_tail
+        # hold the D bytes contributed by @base and inherited ancestors; a
+        # register's own @ext bytes are appended by the mapper at emission.
         by_name: Dict[str, List[int]] = {}
         for idx, reg in enumerate(ir["registers"]):
             by_name.setdefault(reg["name"], []).append(idx)
@@ -576,6 +592,70 @@ class TspParser:
             if "read_tail" not in meta and "write_tail" not in meta:
                 reg["unsupported"] = True
                 reg["unsupported_reason"] = "no read/write id resolved from @inherit"
+
+        # Resolve payload fields through the same @inherit graph as ids.
+        # Parent fields retain their original order; same-name fields are
+        # overridden in place so generic/template definitions can be
+        # specialized by the child without duplicating a wire field.
+        own_fields: dict[int, list[dict[str, Any]]] = {
+            id(reg): copy.deepcopy(reg.get("fields") or []) for reg in ir["registers"]
+        }
+        resolved_fields: dict[int, list[dict[str, Any]]] = {}
+        resolving_fields: set[int] = set()
+
+        def merge_field(
+            inherited: dict[str, Any], override: dict[str, Any]
+        ) -> dict[str, Any]:
+            merged = {**inherited, **override}
+            merged["meta"] = {
+                **inherited.get("meta", {}),
+                **override.get("meta", {}),
+            }
+            decorators = list(inherited.get("decorators") or [])
+            decorators.extend(override.get("decorators") or [])
+            if decorators:
+                merged["decorators"] = decorators
+            return merged
+
+        def resolve_fields(reg: Dict[str, Any]) -> list[dict[str, Any]]:
+            reg_id = id(reg)
+            if reg_id in resolved_fields:
+                return resolved_fields[reg_id]
+            if reg_id in resolving_fields:
+                self.log.warn(
+                    "parse",
+                    "cyclic @inherit payload fields",
+                    model=reg.get("name"),
+                    line=reg.get("line"),
+                )
+                return copy.deepcopy(own_fields[reg_id])
+
+            resolving_fields.add(reg_id)
+            fields: list[dict[str, Any]] = []
+            field_indexes: dict[str, int] = {}
+
+            def add_fields(source_fields: list[dict[str, Any]]) -> None:
+                for source_field in source_fields:
+                    field = copy.deepcopy(source_field)
+                    field_name = str(field.get("name", ""))
+                    if field_name in field_indexes:
+                        index = field_indexes[field_name]
+                        fields[index] = merge_field(fields[index], field)
+                    else:
+                        field_indexes[field_name] = len(fields)
+                        fields.append(field)
+
+            for parent_name in reg.get("inherit") or []:
+                parent = resolve_parent(reg, parent_name)
+                if parent is not None:
+                    add_fields(resolve_fields(parent))
+            add_fields(own_fields[reg_id])
+            resolving_fields.remove(reg_id)
+            resolved_fields[reg_id] = fields
+            return fields
+
+        for reg in ir["registers"]:
+            reg["fields"] = resolve_fields(reg)
 
         return ir
 
@@ -934,12 +1014,13 @@ class TspParser:
             token = token.strip()
             if not token:
                 continue
+            decorators: List[Dict[str, Any]] = []
             if token.startswith("@"):
-                _, token = _split_leading_decorators(token)
+                decorators, token = _split_leading_decorators(token)
                 token = token.strip()
             fm = _FIELD_RE.match(token)
             if fm:
-                fields.append({"name": fm.group(1), "type": fm.group(2)})
+                fields.append(_raw_model_field(fm.group(1), fm.group(2), decorators))
         return fields
 
     @staticmethod
@@ -948,29 +1029,40 @@ class TspParser:
     ) -> Tuple[List[Dict[str, str]], int]:
         """Collect raw field pairs of a plain model body; returns (fields, next_i)."""
         fields: List[Dict[str, str]] = []
+        pending: List[Dict[str, Any]] = []
         i = start_i
         while i < len(lines):
             line = lines[i]
-            # A field may share its line with its decorators
-            # (`@maxLength(1) ign: IGN;`); strip them before matching.
-            field_line = line
-            if line.lstrip().startswith("@"):
-                _, field_line = _split_leading_decorators(line)
-            fm = _FIELD_RE.match(field_line)
-            if fm:
-                fields.append({"name": fm.group(1), "type": fm.group(2)})
+            # Decorators sit on their own line(s) above the field or share
+            # its line (`@maxLength(1) ign: IGN;`). Both are kept so
+            # composite expansion can honour @constValue/@maxLength/...
+            decorators, rest = _split_leading_decorators(line)
+            if decorators and not rest.strip():
+                pending.extend(decorators)
                 i += 1
                 continue
+            fm = _FIELD_RE.match(rest)
+            if fm:
+                fields.append(
+                    _raw_model_field(fm.group(1), fm.group(2), pending + decorators)
+                )
+                pending = []
+                i += 1
+                continue
+            pending = []
             if _CLOSE_BRACE_RE.match(line):
                 return fields, i + 1
             close_at = line.find("}")
             if close_at >= 0:
                 head = line[:close_at]
-                if head.lstrip().startswith("@"):
-                    _, head = _split_leading_decorators(head)
-                fm = _FIELD_RE.match(head.strip())
+                head_decorators, head_rest = _split_leading_decorators(head)
+                fm = _FIELD_RE.match(head_rest.strip())
                 if fm:
-                    fields.append({"name": fm.group(1), "type": fm.group(2)})
+                    fields.append(
+                        _raw_model_field(
+                            fm.group(1), fm.group(2), pending + head_decorators
+                        )
+                    )
                 return fields, i + 1
             i += 1
         return fields, i

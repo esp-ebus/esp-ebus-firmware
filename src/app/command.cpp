@@ -414,6 +414,21 @@ bool Command::isFieldRaw(size_t i) const {
   return fields_[i].raw;
 }
 
+bool Command::isFieldConst(size_t i) const {
+  return i < fields_.size() && fields_[i].const_present;
+}
+
+size_t Command::fieldConstBytes(size_t i, uint8_t (&out)[16]) const {
+  if (i >= fields_.size() || fields_[i].const_str_id == 0) return 0;
+  const std::string_view hex =
+      StringPool::instance().lookup(fields_[i].const_str_id);
+  if (hex.empty() || hex.size() > sizeof(out) * 2 || hex.size() % 2 != 0) {
+    return 0;
+  }
+  const size_t len = ebus::toBytes(hex, out, sizeof(out));
+  return len == hex.size() / 2 ? len : 0;
+}
+
 bool Command::hasFieldBits(size_t i) const {
   return i < fields_.size() && fields_[i].bits_str_id != 0;
 }
@@ -633,6 +648,9 @@ ebus::Sequence Command::getVectorFromValue(std::string_view value_json,
   // the object form, otherwise the wire payload would be truncated.
   if (fields_.size() != 1) return {};
 
+  // Const fields are fixed wire bytes, never client input.
+  if (isFieldConst(field_idx)) return {};
+
   return encodeFieldRaw(value_json, field_idx);
 }
 
@@ -722,7 +740,16 @@ ebus::Sequence Command::getVectorFromObject(
       }
     }
     ebus::Sequence field_bytes;
-    if (have) {
+    if (fname != nullptr && isFieldConst(i)) {
+      // Const field: fixed wire bytes, never client input. A provided
+      // value rejects the payload instead of silently overriding them.
+      if (have) return {};
+      uint8_t const_bytes[16];
+      const size_t const_len = fieldConstBytes(i, const_bytes);
+      if (const_len == 0) return {};
+      for (size_t k = 0; k < const_len; ++k)
+        field_bytes.push_back(const_bytes[k], false);
+    } else if (have) {
       field_bytes = encodeFieldRaw(raw, i);
     } else if (fname != nullptr && isIgnFieldName(fname)) {
       // Filler: pad with zero bytes of the field's datatype width (wire
@@ -991,33 +1018,37 @@ Command Command::fromJson(ebus::detail::JsonReader& reader) {
           if (field_token != ebus::detail::JsonReader::Token::object_start)
             break;
           command_types::FieldRef field;
-          r.forEachField(
-              [&](std::string_view fkey, ebus::detail::JsonReader& fr) -> bool {
-                const auto tok = fr.next();
-                if (fkey == "name")
-                  field.name_id = StringPool::instance().intern(fr.value());
-                else if (fkey == "profile") {
-                  const DataProfile* p = findDataProfile(fr.value());
-                  field.profile_idx = p ? getProfileIndex(p) : 0;
-                } else if (fkey == "position")
-                  // Byte offset in the payload (1..NN); no nibble mask —
-                  // position 16 is legal (NN=16) and 0 means "unset" (defaults
-                  // to 1).
-                  field.position = static_cast<uint8_t>(fr.asNum<size_t>());
-                else if (fkey == "ha_profile") {
-                  const HAProfile* p = findHAProfile(fr.value());
-                  field.ha_profile_idx = p ? getHaProfileIndex(p) : 0;
-                } else if (fkey == "bits") {
-                  if (tok == ebus::detail::JsonReader::Token::object_start)
-                    parseBitsMap(fr, field.bits_str_id);
-                } else if (fkey == "raw")
-                  field.raw = fr.asBool();
-                else if (fkey == "min")
-                  pending_min[command.fields_.size()] = fr.asNum<float>();
-                else if (fkey == "max")
-                  pending_max[command.fields_.size()] = fr.asNum<float>();
-                return true;
-              });
+          r.forEachField([&](std::string_view fkey,
+                             ebus::detail::JsonReader& fr) -> bool {
+            const auto tok = fr.next();
+            if (fkey == "name")
+              field.name_id = StringPool::instance().intern(fr.value());
+            else if (fkey == "profile") {
+              const DataProfile* p = findDataProfile(fr.value());
+              field.profile_idx = p ? getProfileIndex(p) : 0;
+            } else if (fkey == "position")
+              // Byte offset in the payload (1..NN); no nibble mask —
+              // position 16 is legal (NN=16) and 0 means "unset" (defaults
+              // to 1).
+              field.position = static_cast<uint8_t>(fr.asNum<size_t>());
+            else if (fkey == "ha_profile") {
+              const HAProfile* p = findHAProfile(fr.value());
+              field.ha_profile_idx = p ? getHaProfileIndex(p) : 0;
+            } else if (fkey == "bits") {
+              if (tok == ebus::detail::JsonReader::Token::object_start)
+                parseBitsMap(fr, field.bits_str_id);
+            } else if (fkey == "const") {
+              field.const_present = true;
+              if (tok == ebus::detail::JsonReader::Token::string)
+                field.const_str_id = StringPool::instance().intern(fr.value());
+            } else if (fkey == "raw")
+              field.raw = fr.asBool();
+            else if (fkey == "min")
+              pending_min[command.fields_.size()] = fr.asNum<float>();
+            else if (fkey == "max")
+              pending_max[command.fields_.size()] = fr.asNum<float>();
+            return true;
+          });
           command.fields_.push_back(field);
         }
       }
@@ -1586,6 +1617,23 @@ std::string_view Command::evaluate(ebus::detail::JsonReader& reader,
               if (ftoken != ebus::detail::JsonReader::Token::boolean) {
                 snprintf(command_eval_error_buf, sizeof(command_eval_error_buf),
                          "Invalid type for field: raw");
+                error = command_eval_error_buf;
+              }
+            } else if (fkey == "const") {
+              // Fixed wire bytes as hex (max 16 data bytes).
+              bool const_ok = ftoken == ebus::detail::JsonReader::Token::string;
+              if (const_ok) {
+                auto chex = fr.value();
+                const_ok = !chex.empty() && chex.size() <= 32 &&
+                           chex.size() % 2 == 0 &&
+                           !std::any_of(chex.begin(), chex.end(), [](char c) {
+                             return !isxdigit((unsigned char)c);
+                           });
+              }
+              if (!const_ok) {
+                snprintf(command_eval_error_buf, sizeof(command_eval_error_buf),
+                         "Invalid const for field: %.*s",
+                         static_cast<int>(field_name_len), field_name_buf);
                 error = command_eval_error_buf;
               }
             }

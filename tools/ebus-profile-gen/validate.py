@@ -130,6 +130,21 @@ def validate_log(
                     f"(max {MAX_FIELDS_PER_COMMAND})"
                 )
             for field in cmd.get("fields", []):
+                const = field.get("const")
+                if const is not None:
+                    # Fixed wire bytes as hex: non-empty, even length,
+                    # at most the 16-byte data cap.
+                    if (
+                        not isinstance(const, str)
+                        or not const
+                        or len(const) > 32
+                        or len(const) % 2 != 0
+                        or any(c not in "0123456789abcdefABCDEF" for c in const)
+                    ):
+                        issues.append(
+                            f"[command] {cmd.get('key')} field "
+                            f"{field.get('name')!r} has invalid const {const!r}"
+                        )
                 profile = field.get("profile")
                 if profile and profile not in known:
                     issues.append(

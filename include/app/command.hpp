@@ -35,6 +35,9 @@ struct FieldRef {
   // in bit-index order (bit i = i-th segment). One wire byte expands to
   // one JSON key / MQTT topic / HA entity per bit at payload time.
   uint8_t bits_str_id = 0;
+  // Fixed wire bytes (`const`, StringPool id of hex, 0 = absent).
+  uint8_t const_str_id = 0;
+  bool const_present = false;
   // Raw presentation: skip sentinel-to-null mapping in decode, return the
   // raw numeric value instead. Opt-in per field (default false).
   bool raw = false;
@@ -123,6 +126,10 @@ class Command {
   // Raw presentation flag for field i (out of range reads false).
   bool isFieldRaw(size_t i) const;
 
+  // Fixed-value (`const`) flag for field i: writes pad the stored wire
+  // bytes instead of taking client input (out of range reads false).
+  bool isFieldConst(size_t i) const;
+
   // Bit-map accessors (field i carries a `bits` name→index map).
   bool hasFieldBits(size_t i) const;
   // Number of bits (0 when the field has no map). Max 8 (BI0..BI7).
@@ -191,6 +198,9 @@ class Command {
   // len(id)-2 (explicit override); write discards its NN byte - the
   // value length is unknowable at parse time, so buildWriteCmd always
   // derives NN from the wid length plus the encoded value length.
+  // Decode field i's fixed `const` bytes into a caller-owned buffer.
+  size_t fieldConstBytes(size_t i, uint8_t (&out)[16]) const;
+
   void setIdBytes(ebus::ByteView bytes);
   void setWidBytes(ebus::ByteView bytes);
   void setLegacyReadCmd(ebus::ByteView bytes);

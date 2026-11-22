@@ -727,6 +727,92 @@ TEST_CASE("Command write does not pad ign-like non-filler names", "[Command]") {
   REQUIRE(v[1] == 'A');
 }
 
+TEST_CASE("Command write pads const fields with fixed bytes", "[Command]") {
+  const std::string json = R"({
+  "key": "constmf",
+  "name": "ConstMF",
+  "zz": "50",
+  "pbsb": "0301",
+  "wpbsb": "b509",
+  "wdx": "0400",
+  "interval": 0,
+  "master": false,
+  "fields": [
+    {"name": "value", "profile": "uint8", "position": 1, "ha_profile": ""},
+    {"name": "magic", "profile": "uint16", "position": 2, "ha_profile": "", "const": "ffff"},
+    {"name": "tail", "profile": "uint8", "position": 4, "ha_profile": ""}
+  ]
+})";
+  JsonReader validation(json);
+  REQUIRE(Command::evaluate(validation).empty());
+  JsonReader reader(json);
+  Command cmd = Command::fromJson(reader);
+
+  // Const fields are omitted by the client and padded with their fixed
+  // wire bytes (uint16 -> 2 bytes), keeping positions right.
+  auto v = cmd.getVectorFromValue(R"({"value":5,"tail":9})");
+  REQUIRE(v.size() == 4);
+  REQUIRE(v[0] == 5);
+  REQUIRE(v[1] == 0xff);
+  REQUIRE(v[2] == 0xff);
+  REQUIRE(v[3] == 9);
+
+  // A provided const value rejects instead of overriding the fixed bytes.
+  REQUIRE(cmd.getVectorFromValue(R"({"value":5,"magic":1,"tail":9})").empty());
+
+  // Missing non-const field still rejects.
+  REQUIRE(cmd.getVectorFromValue(R"({"value":5})").empty());
+}
+
+TEST_CASE("Command write const-only command needs no client input",
+          "[Command]") {
+  const std::string json = R"({
+  "key": "constonly",
+  "name": "ConstOnly",
+  "zz": "50",
+  "pbsb": "0301",
+  "wpbsb": "b514",
+  "wdx": "0515",
+  "interval": 0,
+  "master": false,
+  "fields": [
+    {"name": "magic", "profile": "hex3", "position": 1, "ha_profile": "", "const": "03ffff"}
+  ]
+})";
+  JsonReader validation(json);
+  REQUIRE(Command::evaluate(validation).empty());
+  JsonReader reader(json);
+  Command cmd = Command::fromJson(reader);
+
+  auto v = cmd.getVectorFromValue("{}");
+  REQUIRE(v.size() == 3);
+  REQUIRE(v[0] == 0x03);
+  REQUIRE(v[1] == 0xff);
+  REQUIRE(v[2] == 0xff);
+
+  // Scalar input for a const field rejects (consts are never client input).
+  REQUIRE(cmd.getVectorFromValue("1").empty());
+  REQUIRE(cmd.getVectorFromValue(R"({"magic":1})").empty());
+}
+
+TEST_CASE("Command evaluate rejects malformed const", "[Command]") {
+  const std::string json = R"({
+  "key": "constbad",
+  "name": "ConstBad",
+  "zz": "50",
+  "pbsb": "0301",
+  "wpbsb": "b509",
+  "wdx": "0400",
+  "interval": 0,
+  "master": false,
+  "fields": [
+    {"name": "value", "profile": "uint8", "position": 1, "ha_profile": "", "const": "zz"}
+  ]
+})";
+  JsonReader validation(json);
+  REQUIRE_FALSE(Command::evaluate(validation).empty());
+}
+
 TEST_CASE("Command single-field accepts scalar and object forms", "[Command]") {
   const std::string json = R"({
   "key": "sf",
