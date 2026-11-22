@@ -615,6 +615,12 @@ class TspParser:
             decorators.extend(override.get("decorators") or [])
             if decorators:
                 merged["decorators"] = decorators
+                directions = [
+                    dec["name"] for dec in decorators
+                    if dec.get("name") in ("in", "out")
+                ]
+                if len(set(directions)) > 1:
+                    merged["meta"]["direction_conflict"] = True
             return merged
 
         def resolve_fields(reg: Dict[str, Any]) -> list[dict[str, Any]]:
@@ -1388,9 +1394,29 @@ class TspParser:
                     if enum_name in ir["enums"]:
                         field["meta"]["values"] = ir["enums"][enum_name]["entries"]
             elif dname == "in":
-                field["meta"]["direction"] = "in"
+                previous = field["meta"].get("direction")
+                if previous not in (None, "in"):
+                    field["meta"]["direction_conflict"] = True
+                else:
+                    field["meta"]["direction"] = "in"
+                if args:
+                    value = args[0].strip().lower()
+                    if value in ("true", "false"):
+                        field["meta"]["write_only"] = value == "true"
+                    else:
+                        field["meta"]["direction_conflict"] = True
             elif dname == "out":
-                field["meta"]["direction"] = "out"
+                previous = field["meta"].get("direction")
+                if previous not in (None, "out"):
+                    field["meta"]["direction_conflict"] = True
+                else:
+                    field["meta"]["direction"] = "out"
+                if args:
+                    value = args[0].strip().lower()
+                    if value in ("true", "false"):
+                        field["meta"]["write_only"] = value == "true"
+                    else:
+                        field["meta"]["direction_conflict"] = True
             elif dname == "constValue":
                 if args:
                     field["meta"]["const_value"] = args[0]

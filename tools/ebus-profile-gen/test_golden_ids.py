@@ -7,7 +7,7 @@ base D bytes + member ext), BI byte-grouping (consecutive BI0..BI7 runs
 collapse to one UINT8 field carrying a `bits` name->bit map), write-only
 commands with an empty id, 1-based byte positions of fields, and composite
 expansion field shapes (plain models → positioned leaves). It also checks
-that TypeSpec field metadata reaches command fields and matching data
+field `@in`/`@out` inclusion, TypeSpec field metadata, and matching data
 profiles. Run from the repo root:
 
     python3 tools/ebus-profile-gen/test_golden_ids.py
@@ -416,6 +416,31 @@ def expect_unit_profile_mappings() -> None:
 
 
 def main() -> int:
+    # Direction decorator inclusion and writeOnly side selection.
+    direction_cases = [
+        ("neutral", {}, "read", True),
+        ("neutral", {}, "write", True),
+        ("in", {"direction": "in"}, "read", True),
+        ("in", {"direction": "in"}, "write", False),
+        ("out", {"direction": "out"}, "read", False),
+        ("out", {"direction": "out"}, "write", True),
+        ("out true", {"direction": "out", "write_only": True}, "read", False),
+        ("out true", {"direction": "out", "write_only": True}, "write", True),
+        ("in false", {"direction": "in", "write_only": False}, "read", True),
+        ("in false", {"direction": "in", "write_only": False}, "write", False),
+        ("conflict", {"direction_conflict": True}, "read", False),
+        ("conflict", {"direction_conflict": True}, "write", False),
+    ]
+    for label, meta, rw, expected in direction_cases:
+        global _checks
+        _checks += 1
+        field = FieldIR(name=label, ebus_type="UCH", meta=meta)
+        got = mapper._field_included_for_direction(field, rw)
+        if got != expected:
+            _failures.append(
+                f"direction {label}: {rw} inclusion expected {expected}, got {got}"
+            )
+
     # hcmode_inc: @inherit chains, BI gate, no fabricated 0x0d.
     hcmode = entries_for("src/vaillant/hcmode_inc.tsp")
     expect(hcmode, "DateTime", "b50400")
@@ -507,14 +532,13 @@ def main() -> int:
         errors,
         "Errorhistory",
         [
-            "index",
             "errorhistory_status",
             "errorhistory_time",
             "errorhistory_date",
             "errorhistory_error",
         ],
     )
-    expect_positions(errors, "Errorhistory", [1, 2, 3, 5, 8])
+    expect_positions(errors, "Errorhistory", [1, 2, 4, 7])
     expect_fields(
         t392,
         "CcTimer_Monday",

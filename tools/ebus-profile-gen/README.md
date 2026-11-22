@@ -172,9 +172,10 @@ Important boundaries:
 - Validation rejects unsupported/defaulted datatype mappings, unresolved
   profiles, ID/WID values outside the firmware's 2–6-byte range, duplicate
   address IDs, and commands exceeding the 13-field firmware limit.
-- `@in`/`@out` decorators are retained in parser metadata but are not applied
-  to emitted fields. Commands that rely on direction-specific field inclusion
-  are therefore not fully represented by the generated schema.
+- `@in`/`@out` decorators are applied to field inclusion for read/write
+  commands. `@in` fields belong to read payloads, `@out` fields belong to write
+  payloads; an optional `writeOnly` argument keeps a field on the requested side
+  (`true`) or read side (`false`).
 - Profile mappings cover only recognized type/unit/scaling combinations.
   `ha_profile` defaults to empty; bit-map fields are assigned
   `binary_sensor`.

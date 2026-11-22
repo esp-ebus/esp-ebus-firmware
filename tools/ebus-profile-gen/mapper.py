@@ -872,7 +872,38 @@ def _decorator_meta(decorators: List[Dict[str, Any]]) -> Dict[str, Any]:
             meta["const_value"] = args[0]
         elif name == "maxLength" and args:
             meta["max_length"] = args[0]
+        elif name in ("in", "out"):
+            previous = meta.get("direction")
+            direction = name
+            if previous not in (None, direction):
+                meta["direction_conflict"] = True
+            else:
+                meta["direction"] = direction
+            if args:
+                value = args[0].strip().lower()
+                if value in ("true", "false"):
+                    meta["write_only"] = value == "true"
+                else:
+                    meta["direction_conflict"] = True
     return meta
+
+
+def _field_included_for_direction(field: FieldIR, rw: str) -> bool:
+    """Apply @in/@out and writeOnly field inclusion for a command side."""
+    meta = field.meta or {}
+    if meta.get("direction_conflict"):
+        return False
+
+    write_only = meta.get("write_only")
+    if write_only is not None:
+        return (rw == "write") if write_only else (rw == "read")
+
+    direction = meta.get("direction")
+    if direction == "in":
+        return rw == "read"
+    if direction == "out":
+        return rw == "write"
+    return True
 
 
 def _const_wire_hex(field: FieldIR) -> str:
@@ -1764,12 +1795,46 @@ def build_profiles_and_commands(
         else:
             rw = reg.get("rw", "read")
 
+        before_filter = list(field_irs)
+        field_irs = [
+            f
+            for f in before_filter
+            if _field_included_for_direction(f, rw)
+        ]
+        conflicts = [
+            f.name for f in before_filter
+            if (f.meta or {}).get("direction_conflict")
+        ]
+        for f in before_filter:
+            if f not in field_irs:
+                log.debug(
+                    "command",
+                    "field excluded by direction decorator",
+                    action="field_direction_excluded",
+                    name=reg_name,
+                    field=f.name,
+                    rw=rw,
+                    direction=(f.meta or {}).get("direction", ""),
+                    write_only=(f.meta or {}).get("write_only"),
+                )
+        if conflicts:
+            log.warn(
+                "command",
+                "conflicting @in/@out field decorators",
+                action="direction_conflict",
+                name=reg_name,
+                fields=conflicts,
+            )
+
         unsupported = False
         unsupported_reason = ""
 
         if reg.get("unsupported"):
             unsupported = True
             unsupported_reason = reg.get("unsupported_reason", "unsupported register")
+        if conflicts:
+            unsupported = True
+            unsupported_reason = "conflicting @in/@out field decorators"
 
         if rw not in ("read", "write"):
             unsupported = True
