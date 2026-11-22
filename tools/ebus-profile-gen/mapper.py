@@ -1069,6 +1069,23 @@ def commands_to_flat_entries(
         zz = meta.get("zz")
         if zz is None:
             zz = default_zz if default_zz is not None else 0x08
+        if meta.get("write_to_source"):
+            valid_source = {
+                0x00, 0x01, 0x03, 0x07, 0x0f,
+                0x10, 0x11, 0x13, 0x17, 0x1f,
+                0x30, 0x31, 0x33, 0x37, 0x3f,
+                0x70, 0x71, 0x73, 0x77, 0x7f,
+                0xf0, 0xf1, 0xf3, 0xf7, 0xff,
+            }
+            if zz not in valid_source:
+                source_zz = (zz - 5) & 0xff
+                if source_zz in valid_source:
+                    zz = source_zz
+                else:
+                    c.unsupported = True
+                    c.unsupported_reason = (
+                        f"@write(true) target zz={zz:02x} has no source address pendant"
+                    )
         mf = meta.get("mf", default_mf)  # Default MF (PB byte, e.g. 0xb5)
         pb = meta.get("pb", 0x09)  # Default SB
 

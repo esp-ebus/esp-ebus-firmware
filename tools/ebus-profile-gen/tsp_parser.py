@@ -8,7 +8,8 @@ Supported constructs:
   * decorators: @zz(0x08), @base(MF, 0x09, 0x29), @ext(0xa8, 0), @id(...),
                 @write, @passive, @auth(...), @poll(...), @unit("..."),
                 @divisor(N), @factor(N), @step(N), @values(Enum),
-                @maxLength(N), @condition(...)
+                @maxLength(N), @qq(...), @readonly, @condition(...),
+                @conditionExt(...), @example(...), @chain(...)
   * alias: alias MF = 0xb5;
   * scalar: scalar Name extends Type;
   * enum: enum Name { Key: value, ... }
@@ -595,7 +596,8 @@ class TspParser:
                         continue
                     pmeta = parent["meta"]
                     # zz/mf/pb form the shared addressing prefix.
-                    for k in ("zz", "mf", "pb"):
+                    for k in ("zz", "mf", "pb", "readonly", "chain",
+                              "condition", "condition_ext"):
                         if k not in meta and k in pmeta:
                             meta[k] = pmeta[k]
                             changed = True
@@ -610,7 +612,11 @@ class TspParser:
                                 meta["read_pb"] = pmeta["read_pb"]
                             changed = True
                     # Write side: first write parent wins.
-                    if "write_tail" in pmeta and "write_tail" not in meta:
+                    if (
+                        "write_tail" in pmeta
+                        and "write_tail" not in meta
+                        and not pmeta.get("readonly")
+                    ):
                         meta["write_tail"] = list(pmeta["write_tail"]) + list(
                             pmeta.get("ext") or []
                         )
@@ -620,6 +626,21 @@ class TspParser:
 
         for reg in ir["registers"]:
             meta = reg["meta"]
+            if meta.get("chain"):
+                reg["unsupported"] = True
+                reg["unsupported_reason"] = (
+                    "@chain constructs multiple IDs unsupported by firmware schema"
+                )
+            elif meta.get("condition") or meta.get("condition_ext"):
+                reg["unsupported"] = True
+                reg["unsupported_reason"] = (
+                    "conditional command emission is unsupported"
+                )
+            elif meta.get("readonly") and reg.get("rw") == "write":
+                reg["unsupported"] = True
+                reg["unsupported_reason"] = (
+                    "@readonly inheritance cannot emit a write command"
+                )
             # Own @write with read-only parents still gets a write side.
             if reg.get("rw") == "write" and "write_tail" not in meta:
                 meta["write_tail"] = []
@@ -1575,14 +1596,50 @@ class TspParser:
                 if id_bytes:
                     register["register"] = "".join(f"{b:02x}" for b in id_bytes)
             elif dname == "write":
-                # The write D1 comes from the direction parent's base tail
-                # (or this model's own @base), never a hardcoded 0x0e.
+                # @write has write-direction semantics. Its optional boolean
+                # selects source-address mode; it is not an NN override.
                 register["rw"] = "write"
                 register["meta"]["explicit_write"] = True
                 if args:
+                    value = args[0].strip().lower()
+                    if value in ("true", "false"):
+                        register["meta"]["write_to_source"] = value == "true"
+                    else:
+                        register["unsupported"] = True
+                        register["unsupported_reason"] = (
+                            "@write argument must be true or false"
+                        )
+            elif dname == "qq":
+                if args:
                     v = _resolve_constant(args[0], aliases)
                     if v is not None:
-                        register["meta"]["write_nn"] = v
+                        register["meta"]["qq"] = v
+                    else:
+                        register["unsupported"] = True
+                        register["unsupported_reason"] = "@qq source address is unresolved"
+                register["unsupported"] = True
+                register["unsupported_reason"] = (
+                    "@qq source addressing is unsupported by firmware schema"
+                )
+            elif dname == "readonly":
+                register["meta"]["readonly"] = True
+                register["rw"] = "read"
+            elif dname == "chain":
+                register["meta"]["chain"] = args
+                register["unsupported"] = True
+                register["unsupported_reason"] = (
+                    "@chain constructs multiple IDs unsupported by firmware schema"
+                )
+            elif dname == "conditionExt":
+                register["meta"]["condition_ext"] = args
+                register["unsupported"] = True
+                register["unsupported_reason"] = (
+                    "@conditionExt command emission is unsupported"
+                )
+            elif dname == "example":
+                register["meta"]["examples"] = list(
+                    register["meta"].get("examples") or []
+                ) + [args]
             elif dname == "passive":
                 # Does not force rw: a @write @passive base (*uw) stays
                 # writable and additionally gets a passive read side.
@@ -1598,6 +1655,10 @@ class TspParser:
             elif dname == "condition":
                 if args:
                     register["meta"]["condition"] = args
+                    register["unsupported"] = True
+                    register["unsupported_reason"] = (
+                        "@condition command emission is unsupported"
+                    )
 
         self.log.debug(
             "parse",

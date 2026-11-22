@@ -516,7 +516,103 @@ def expect_unit_profile_mappings() -> None:
 
 
 def main() -> int:
+    global _checks
     expect_inheritance_resolution()
+
+    # Decorator semantics that do not have a firmware-safe default.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tsp_path = os.path.join(tmpdir, "decorators.tsp")
+        with open(tsp_path, "w", encoding="utf-8") as fh:
+            fh.write(
+                "alias MF = 0xb5;\n"
+                "@write(true)\n"
+                "@zz(0x08)\n"
+                "@id(MF, 0x01)\n"
+                "model SourceWrite {\n"
+                "  value: UCH;\n"
+                "}\n"
+                "@write\n"
+                "@chain(0, #[0x02])\n"
+                "@id(MF, 0x02)\n"
+                "model Chained {\n"
+                "  value: UCH;\n"
+                "}\n"
+                "@qq(0x71)\n"
+                "@id(MF, 0x03)\n"
+                "model SourceAddress {\n"
+                "  value: UCH;\n"
+                "}\n"
+                "@readonly\n"
+                "@id(MF, 0x04)\n"
+                "model ReadOnly {\n"
+                "  value: UCH;\n"
+                "}\n"
+                "@condition(Id.Id.sw, \">=123\")\n"
+                "@id(MF, 0x05)\n"
+                "model Conditional {\n"
+                "  value: UCH;\n"
+                "}\n"
+            )
+        raw = tsp_parser.TspParser([tsp_path]).parse()
+        registers = {r["name"]: r for r in raw["registers"]}
+
+        for name, predicate, expected in (
+            (
+                "SourceWrite",
+                lambda r: r["rw"] == "write"
+                and r["meta"].get("write_to_source") is True
+                and "write_nn" not in r["meta"],
+                True,
+            ),
+            (
+                "Chained",
+                lambda r: r["unsupported"]
+                and "@chain" in r["unsupported_reason"],
+                True,
+            ),
+            (
+                "SourceAddress",
+                lambda r: r["unsupported"]
+                and "@qq" in r["unsupported_reason"],
+                True,
+            ),
+            (
+                "ReadOnly",
+                lambda r: r["rw"] == "read"
+                and r["meta"].get("readonly") is True,
+                True,
+            ),
+            (
+                "Conditional",
+                lambda r: r["unsupported"]
+                and "condition" in r["unsupported_reason"],
+                True,
+            ),
+        ):
+            _checks += 1
+            if name not in registers or predicate(registers[name]) != expected:
+                _failures.append(
+                    f"decorator semantics {name}: "
+                    f"got {registers.get(name)!r}"
+                )
+
+        fam = mapper.build_profiles_and_commands(raw, log=NULL_LOG)
+        source_entries = mapper.commands_to_flat_entries(
+            fam,
+            aliases=raw.get("aliases", {}),
+            log=NULL_LOG,
+            default_zz=0x08,
+        )
+        source_entry = next(
+            (entry for entry in source_entries if entry["name"] == "SourceWrite"),
+            None,
+        )
+        _checks += 1
+        if source_entry is None or source_entry.get("zz") != "03":
+            _failures.append(
+                "decorator semantics SourceWrite: "
+                f"source-address zz expected '03', got {source_entry!r}"
+            )
 
     # Direction decorator inclusion and writeOnly side selection.
     direction_cases = [
@@ -534,7 +630,6 @@ def main() -> int:
         ("conflict", {"direction_conflict": True}, "write", False),
     ]
     for label, meta, rw, expected in direction_cases:
-        global _checks
         _checks += 1
         field = FieldIR(name=label, ebus_type="UCH", meta=meta)
         got = mapper._field_included_for_direction(field, rw)

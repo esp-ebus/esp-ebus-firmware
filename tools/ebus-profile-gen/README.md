@@ -175,6 +175,11 @@ Important boundaries:
 - Validation rejects unsupported/defaulted datatype mappings, unresolved
   profiles, ID/WID values outside the firmware's 2–6-byte range, duplicate
   address IDs, and commands exceeding the 13-field firmware limit.
+- Address and field decorators are audited explicitly: `@write(true)` selects
+  the source-address pendant, bare `@write` remains target-address writes,
+  and `@chain`, `@qq`, `@readonly`, `@condition`, `@conditionExt`, and
+  unrepresentable `@write` arguments fail closed instead of emitting a partial
+  command. `@example` is retained as conversion-log metadata.
 - `@in`/`@out` decorators are applied to field inclusion for read/write
   commands. `@in` fields belong to read payloads, `@out` fields belong to write
   payloads; an optional `writeOnly` argument keeps a field on the requested side
