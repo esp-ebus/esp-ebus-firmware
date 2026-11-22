@@ -576,6 +576,45 @@ def _classify_type(
     return "defaulted"
 
 
+UNIT_PROFILE_BASES: Dict[Tuple[str, str], str] = {
+    ("DATA1C", "h"): "data1c_hour",
+    ("UINT16", "l/min"): "uint16_lpm",
+    ("UINT16R", "ppm"): "uint16r_ppm",
+    ("UINT16R", "m³/h"): "uint16r_m3h",
+    ("INT16", "kw"): "int16_kw",
+    ("FLOAT32", "h"): "float32_hour",
+    ("INT16", "°min"): "int16_degree_min",
+    ("UINT16", "u/sec"): "uint16_u_per_sec",
+    ("FLOAT32", "rps"): "float32_rps",
+    ("INT16R", "v"): "int16r_volt",
+    ("INT16R", "m³/h"): "int16r_m3h",
+    ("INT8", "kw"): "int8_kw",
+    ("UINT16", "ppm"): "uint16_ppm",
+    ("UINT16R", "pa"): "uint16r_pa",
+    ("UINT16R", "h"): "uint16r_hour",
+    ("UINT16R", "rpm"): "uint16r_rpm",
+    ("DATA2C", "bar"): "data2c_bar",
+    ("FLOAT32", "w"): "float32_w",
+    ("FLOAT32", "kw"): "float32_kw",
+    ("INT16", "u/s"): "int16_u_per_s",
+    ("INT16", "l/min"): "int16_lpm",
+    ("UINT16", "mwh"): "uint16_mwh",
+    ("UINT16", "pa"): "uint16_pa",
+    ("UINT16", "v"): "uint16_volt",
+    ("UINT16", "bar"): "uint16_bar",
+    ("UINT16", "kohm"): "uint16_kohm",
+    ("UINT16R", "days"): "uint16r_days",
+    ("UINT16R", "m³"): "uint16r_m3",
+    ("UINT32", "mbar"): "uint32_mbar",
+    ("UINT16", "hz"): "uint16_hz",
+    ("UINT16", "days"): "uint16_days",
+    ("UINT16", "l/s"): "uint16_lps",
+    ("UINT16", "m"): "uint16_m",
+    ("UINT32", "min"): "uint32_min",
+    ("UINT8", "°min"): "uint8_degree_min",
+}
+
+
 def _map_profile_name(
     ebus_type: str,
     unit: str,
@@ -728,6 +767,15 @@ def _map_profile_name(
             if divider != 1:
                 name += f"_div{format(divider, 'g').replace('.', 'p')}"
             return name
+
+    unit_profile_base = UNIT_PROFILE_BASES.get((datatype, unit_lower))
+    if unit_profile_base:
+        if divider != 1:
+            return (
+                f"{unit_profile_base}_div"
+                f"{format(divider, 'g').replace('.', 'p')}"
+            )
+        return unit_profile_base
 
     # Basic type fallback
     basic_map = {

@@ -245,5 +245,6 @@ truth (concatenation model, BI gate, write-only `id: ""`):
 
 ```bash
 python3 tools/ebus-profile-gen/test_golden_ids.py
+python3 tools/ebus-profile-gen/test_profile_mappings.py
 ```
 
