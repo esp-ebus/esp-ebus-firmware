@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Any
 
 try:
-    from .model import FieldIR, ProfileIR, CommandIR, FamilyIR, profile_key_from_fields
-    from .convlog import NULL_LOG, ConversionLog
+    from .convlog import NULL_LOG
+    from .model import CommandIR, FamilyIR, FieldIR, ProfileIR
 except ImportError:
-    from model import FieldIR, ProfileIR, CommandIR, FamilyIR, profile_key_from_fields
-    from convlog import NULL_LOG, ConversionLog
+    from convlog import NULL_LOG
+    from model import CommandIR, FamilyIR, FieldIR, ProfileIR
 
 
 # Mapping from eBUS TypeSpec base types to our datatypes
 # These are the base types from ebus-typespec/lib/types.tsp
-TYPE_MAP: Dict[str, str] = {
+TYPE_MAP: dict[str, str] = {
     # 1 byte types
     "UCH": "UINT8",
     "SCH": "INT8",
@@ -150,7 +150,7 @@ TYPE_MAP: Dict[str, str] = {
 
 # Byte size per ebus-library DataType name (matches ebus::DataType enum high byte).
 # Used to compute the eBUS write NN byte: NN = 3 + data_byte_count.
-DATATYPE_SIZE: Dict[str, int] = {
+DATATYPE_SIZE: dict[str, int] = {
     # 1 byte
     "BCD8": 1,
     "UINT8": 1,
@@ -329,7 +329,7 @@ SUPPORTED_DATATYPES: set = {
 
 # Mapping from ebusd-configuration scalar names to our datatypes
 # These are from _templates.tsp and device-specific includes
-SCALAR_TYPE_MAP: Dict[str, str] = {
+SCALAR_TYPE_MAP: dict[str, str] = {
     # Counter types
     "cntstarts": "BCD24",  # BCD3 -> native 6-digit BCD
     "cntstarts2": "UINT16",  # UIN -> 2-byte unsigned
@@ -414,7 +414,7 @@ SCALAR_TYPE_MAP: Dict[str, str] = {
 }
 
 # Known enum types that map to UINT8
-ENUM_TYPES: Dict[str, str] = {
+ENUM_TYPES: dict[str, str] = {
     "Values_unit": "UINT8",
     "Values_fueltype": "UINT8",
     "Values_countertype": "UINT8",
@@ -459,7 +459,7 @@ _BIT_GATED_EBUS_TYPES = frozenset(
 )
 
 
-def _bit_index(ebus_type: str) -> Optional[int]:
+def _bit_index(ebus_type: str) -> int | None:
     """Bit number of a BI0..BI7 type, else None."""
     t = _strip_qualified(ebus_type)
     if t.startswith("BI") and t[2:].isdigit():
@@ -469,7 +469,7 @@ def _bit_index(ebus_type: str) -> Optional[int]:
     return None
 
 
-def _merge_bit_runs(fields: List[FieldIR]) -> List[FieldIR]:
+def _merge_bit_runs(fields: list[FieldIR]) -> list[FieldIR]:
     """Collapse each consecutive BI0..BI7 run into one byte-wide UINT8 field.
 
     The bits of a run share a single wire byte, which byte-positioned fields
@@ -477,14 +477,14 @@ def _merge_bit_runs(fields: List[FieldIR]) -> List[FieldIR]:
     whole run as a `bits` name->bit-index map in meta, and count it as one
     UINT8 byte for positions and NN.
     """
-    merged: List[FieldIR] = []
+    merged: list[FieldIR] = []
     i = 0
     while i < len(fields):
         if _bit_index(fields[i].ebus_type) is None:
             merged.append(fields[i])
             i += 1
             continue
-        run: List[FieldIR] = []
+        run: list[FieldIR] = []
         while i < len(fields) and _bit_index(fields[i].ebus_type) is not None:
             run.append(fields[i])
             i += 1
@@ -521,7 +521,7 @@ def _strip_qualified(ebus_type: str) -> str:
     return t
 
 
-def _map_type(ebus_type: str, max_length: Optional[int] = None) -> str:
+def _map_type(ebus_type: str, max_length: int | None = None) -> str:
     """Map an eBUS TypeSpec type to our datatype string.
 
     For STR/HEX/IGN types the @maxLength decorator selects the exact
@@ -542,7 +542,7 @@ def _map_type(ebus_type: str, max_length: Optional[int] = None) -> str:
 
 
 def _classify_type(
-    ebus_type: str, datatype: str, enums: Optional[Dict[str, Any]] = None
+    ebus_type: str, datatype: str, enums: dict[str, Any] | None = None
 ) -> str:
     """Classify a TypeSpec type for the conversion log.
 
@@ -576,7 +576,7 @@ def _classify_type(
     return "defaulted"
 
 
-UNIT_PROFILE_BASES: Dict[Tuple[str, str], str] = {
+UNIT_PROFILE_BASES: dict[tuple[str, str], str] = {
     ("DATA1C", "h"): "data1c_hour",
     ("UINT16", "l/min"): "uint16_lpm",
     ("UINT16R", "ppm"): "uint16r_ppm",
@@ -618,7 +618,7 @@ UNIT_PROFILE_BASES: Dict[Tuple[str, str], str] = {
 def _map_profile_name(
     ebus_type: str,
     unit: str,
-    max_length: Optional[int] = None,
+    max_length: int | None = None,
     divider: float = 1.0,
 ) -> str:
     """Map a field's ebus_type and unit to a profile name in data_profiles.json.
@@ -632,15 +632,16 @@ def _map_profile_name(
 
     # Special mappings based on type + unit combinations
     # Temperature
-    if "celsius" in unit_lower or unit_lower == "°c" or unit_lower == "c":
-        if datatype in SUPPORTED_DATATYPES and datatype.startswith(
-            ("DATA", "INT", "UINT", "FLOAT")
-        ):
-            profile_name = f"{datatype.lower()}_celsius"
-            if divider != 1:
-                divider_name = format(divider, "g").replace(".", "p")
-                profile_name += f"_div{divider_name}"
-            return profile_name
+    if (
+        ("celsius" in unit_lower or unit_lower == "°c" or unit_lower == "c")
+        and datatype in SUPPORTED_DATATYPES
+        and datatype.startswith(("DATA", "INT", "UINT", "FLOAT"))
+    ):
+        profile_name = f"{datatype.lower()}_celsius"
+        if divider != 1:
+            divider_name = format(divider, "g").replace(".", "p")
+            profile_name += f"_div{divider_name}"
+        return profile_name
 
     # Pressure
     if unit_lower == "bar":
@@ -701,15 +702,12 @@ def _map_profile_name(
             )
 
     # Flow rate
-    if unit_lower in ("l/min", "lpm"):
-        if datatype == "DATA2C":
-            return "data2c_lpm"
-    if unit_lower == "l/h":
-        if datatype == "UINT16":
-            return "uint16_lph"
-    if unit_lower == "m3/h":
-        if datatype == "UINT16":
-            return "uint16_m3h"
+    if unit_lower in ("l/min", "lpm") and datatype == "DATA2C":
+        return "data2c_lpm"
+    if unit_lower == "l/h" and datatype == "UINT16":
+        return "uint16_lph"
+    if unit_lower == "m3/h" and datatype == "UINT16":
+        return "uint16_m3h"
 
     # Time
     if unit_lower == "h" or unit_lower == "hour":
@@ -724,9 +722,8 @@ def _map_profile_name(
                 else "uint8_h"
             )
 
-    if unit_lower == "min" or unit_lower == "minute":
-        if datatype == "UINT16":
-            return "uint16_min_div120"
+    if (unit_lower == "min" or unit_lower == "minute") and datatype == "UINT16":
+        return "uint16_min_div120"
 
     # RPM
     if unit_lower == "rpm":
@@ -761,12 +758,11 @@ def _map_profile_name(
             return f"uint32_s_div{format(divider, 'g').replace('.', 'p')}" if divider != 1 else "uint32_s"
 
     # Kelvin
-    if unit_lower == "k":
-        if datatype.startswith(("DATA", "INT", "UINT", "FLOAT")):
-            name = f"{datatype.lower()}_kelvin"
-            if divider != 1:
-                name += f"_div{format(divider, 'g').replace('.', 'p')}"
-            return name
+    if unit_lower == "k" and datatype.startswith(("DATA", "INT", "UINT", "FLOAT")):
+        name = f"{datatype.lower()}_kelvin"
+        if divider != 1:
+            name += f"_div{format(divider, 'g').replace('.', 'p')}"
+        return name
 
     unit_profile_base = UNIT_PROFILE_BASES.get((datatype, unit_lower))
     if unit_profile_base:
@@ -861,7 +857,7 @@ def _map_profile_name(
     return basic_map.get(datatype, "uint8")
 
 
-def _parse_factor(args_str: Optional[str]) -> Optional[float]:
+def _parse_factor(args_str: str | None) -> float | None:
     """Parse a numeric factor/divisor argument."""
     if not args_str:
         return None
@@ -871,7 +867,7 @@ def _parse_factor(args_str: Optional[str]) -> Optional[float]:
         return None
 
 
-def _profile_number(value: Any, default: int = 0) -> Union[int, float]:
+def _profile_number(value: Any, default: int = 0) -> int | float:
     """Normalize numeric profile metadata for identity and JSON output."""
     if value is None:
         return default
@@ -892,7 +888,7 @@ def _profile_number(value: Any, default: int = 0) -> Union[int, float]:
         return default
 
 
-HA_SENSOR_UNIT_PROFILES: Dict[str, str] = {
+HA_SENSOR_UNIT_PROFILES: dict[str, str] = {
     "°c": "sensor_temperature",
     "c": "sensor_temperature",
     "celsius": "sensor_temperature",
@@ -945,12 +941,12 @@ _BOOLEAN_OFF_LABELS = {
 }
 
 
-def _is_binary_enum(meta: Dict[str, Any]) -> bool:
+def _is_binary_enum(meta: dict[str, Any]) -> bool:
     entries = meta.get("values", [])
     if not isinstance(entries, list) or len(entries) != 2:
         return False
 
-    states: Dict[str, int] = {}
+    states: dict[str, int] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             return False
@@ -1011,7 +1007,7 @@ def _semantic_ha_profile(field: FieldIR, rw: str, command_name: str = "") -> str
     return ""
 
 
-def _profile_signature(field: FieldIR) -> Tuple[Any, ...]:
+def _profile_signature(field: FieldIR) -> tuple[Any, ...]:
     """Identify a profile by all properties represented in data_profiles."""
     meta = field.meta or {}
     datatype = field.our_datatype or _map_type(
@@ -1036,9 +1032,9 @@ def _profile_signature(field: FieldIR) -> Tuple[Any, ...]:
     )
 
 
-def _profile_names_for_family(fam: FamilyIR) -> Dict[Tuple[Any, ...], str]:
+def _profile_names_for_family(fam: FamilyIR) -> dict[tuple[Any, ...], str]:
     """Return deterministic profile names shared by profile and command output."""
-    names: Dict[Tuple[Any, ...], str] = {}
+    names: dict[tuple[Any, ...], str] = {}
     used_names: set = set()
     for command in fam.commands:
         for field in command.fields:
@@ -1061,7 +1057,7 @@ def _profile_names_for_family(fam: FamilyIR) -> Dict[Tuple[Any, ...], str]:
     return names
 
 
-def _max_length_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[int]:
+def _max_length_from_meta(meta: dict[str, Any] | None) -> int | None:
     """Parse @maxLength from field/scalar metadata (stored as a string)."""
     if not meta:
         return None
@@ -1074,13 +1070,13 @@ def _max_length_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[int]:
         return None
 
 
-def _decorator_meta(decorators: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _decorator_meta(decorators: list[dict[str, Any]]) -> dict[str, Any]:
     """Metadata contributed by a field's decorators.
 
     Shared by register fields and composite (plain-model) children so both
     paths interpret `@constValue`, `@maxLength`, `@minValue`, ... alike.
     """
-    meta: Dict[str, Any] = {}
+    meta: dict[str, Any] = {}
     for dec in decorators:
         name = dec.get("name", "")
         args = dec.get("args") or []
@@ -1188,7 +1184,7 @@ def tsp_type_to_datatype(tsp_type: str) -> str:
     return _map_type(tsp_type)
 
 
-def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, Any]]:
+def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> list[dict[str, Any]]:
     """Convert FamilyIR commands to flat data_profiles.json schema entries.
 
     Each unique field profile becomes one flat entry:
@@ -1200,7 +1196,7 @@ def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, A
     min/max so fields with different profile metadata remain distinct.
     """
     log = log if log is not None else NULL_LOG
-    entries: List[Dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     profile_names = _profile_names_for_family(fam)
     seen: set = set()
 
@@ -1212,7 +1208,7 @@ def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, A
             # Skip datatypes the ebus-library cannot decode/encode.
             # (e.g. CHAR17+, HEX17+, ERRORHISTORY, POWER, etc.)
             if datatype not in SUPPORTED_DATATYPES:
-                log.warn(
+                log.warning(
                     "profile",
                     "profile entry skipped: datatype not supported by ebus-library",
                     action="skipped_unsupported_datatype",
@@ -1266,10 +1262,10 @@ def profiles_to_flat_entries(fam: FamilyIR, log: Any = None) -> List[Dict[str, A
 def commands_to_flat_entries(
     fam: FamilyIR,
     key_prefix: str = "",
-    aliases: Optional[Dict[str, str]] = None,
+    aliases: dict[str, str] | None = None,
     log: Any = None,
-    default_zz: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    default_zz: int | None = None,
+) -> list[dict[str, Any]]:
     """Convert FamilyIR commands to config/simulation.json schema entries.
 
     {key, name, zz, pbsb, [dx], [nn], wpbsb, [wdx], interval, master,
@@ -1281,8 +1277,8 @@ def commands_to_flat_entries(
     (len(d) + value), with nn only for wire quirks.
     """
     log = log if log is not None else NULL_LOG
-    entries: List[Dict[str, Any]] = []
-    seen_read_id: Dict[str, str] = {}
+    entries: list[dict[str, Any]] = []
+    seen_read_id: dict[str, str] = {}
     profile_names = _profile_names_for_family(fam)
 
     # Try to get MF from aliases if not in meta
@@ -1329,7 +1325,7 @@ def commands_to_flat_entries(
         write_tail = meta.get("write_tail")
         ext_bytes = list(meta.get("ext") or [])
 
-        def _hex(bs: List[int]) -> str:
+        def _hex(bs: list[int]) -> str:
             return "".join(f"{b:02x}" for b in bs)
 
         # NN bytes: ZZ PB SB NN D... [data...]
@@ -1405,7 +1401,7 @@ def commands_to_flat_entries(
         # Build fields with 1-based byte positions: position = 1 + cumulative
         # byte offset of preceding datatype sizes (firmware uses
         # field_pos = position - 1 to index into the data part).
-        fields: List[Dict[str, Any]] = []
+        fields: list[dict[str, Any]] = []
         byte_offset = 0
         for f in c.fields:
             signature = _profile_signature(f)
@@ -1457,7 +1453,7 @@ def commands_to_flat_entries(
             if datatype in DATATYPE_SIZE:
                 byte_offset += DATATYPE_SIZE[datatype]
             else:
-                log.warn(
+                log.warning(
                     "command",
                     "datatype size unknown; positions after this field may be wrong",
                     action="unknown_datatype_size",
@@ -1485,7 +1481,7 @@ def commands_to_flat_entries(
         command_name = _format_command_name(c.name, namespace)
         # Split schema keys: read id = pbsb + dx, write id = wpbsb + wdx.
         # id_hex/wid_hex are always PB SB + tail (>= 4 hex chars) when set.
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "key": key,
             "name": command_name,
             "zz": zz_hex,
@@ -1544,7 +1540,7 @@ def commands_to_flat_entries(
 
 
 def build_profiles_and_commands(
-    raw: Dict[str, Any], manufacturer: int = 0x00, log: Any = None
+    raw: dict[str, Any], manufacturer: int = 0x00, log: Any = None
 ) -> FamilyIR:
     """Build FamilyIR from raw tsp parser IR.
 
@@ -1554,11 +1550,11 @@ def build_profiles_and_commands(
     log = log if log is not None else NULL_LOG
     fam = FamilyIR()
 
-    registers: List[Dict[str, Any]] = raw.get("registers", [])
-    enums: Dict[str, Any] = raw.get("enums", {})
-    scalars: Dict[str, Any] = raw.get("scalars", {})
-    aliases: Dict[str, Any] = raw.get("aliases", {})
-    models: Dict[str, Any] = raw.get("models", {})
+    registers: list[dict[str, Any]] = raw.get("registers", [])
+    enums: dict[str, Any] = raw.get("enums", {})
+    scalars: dict[str, Any] = raw.get("scalars", {})
+    aliases: dict[str, Any] = raw.get("aliases", {})
+    models: dict[str, Any] = raw.get("models", {})
 
     # Identify base models that are only used for inheritance
     # These are models that appear in other models' @inherit decorators
@@ -1573,12 +1569,12 @@ def build_profiles_and_commands(
 
     # Resolve scalar aliases and types: if a field type is an alias or scalar,
     # follow to the base type and collect metadata
-    def resolve_type_and_meta(t: str) -> tuple[str, Dict[str, Any]]:
+    def resolve_type_and_meta(t: str) -> tuple[str, dict[str, Any]]:
         """Resolve a type to its base type and collect metadata (unit, min, max, etc.)"""
         t_orig = t
         t = _strip_qualified(t)
         visited: set[str] = set()
-        meta: Dict[str, Any] = {}
+        meta: dict[str, Any] = {}
 
         # Follow alias chain
         while t in aliases and t not in visited:
@@ -1625,7 +1621,7 @@ def build_profiles_and_commands(
         datatype = _map_type(t)
         classification = _classify_type(t, datatype, enums)
         if classification == "defaulted":
-            log.warn(
+            log.warning(
                 "resolve",
                 "type has no TypeSpec→library mapping; using raw name",
                 action="defaulted",
@@ -1634,7 +1630,7 @@ def build_profiles_and_commands(
                 datatype=datatype,
             )
         elif classification == "unsupported":
-            log.warn(
+            log.warning(
                 "resolve",
                 "type has no native ebus-library DataType equivalent",
                 action="unsupported",
@@ -1656,8 +1652,8 @@ def build_profiles_and_commands(
         return t, meta
 
     def _lookup_model(
-        type_name: str, namespace: Optional[str] = None
-    ) -> Dict[str, Any]:
+        type_name: str, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Look up a model by name, preferring namespace-qualified keys.
 
         With the fix for namespace collisions, models are stored with qualified
@@ -1693,10 +1689,10 @@ def build_profiles_and_commands(
     def expand_composite_field(
         parent_name: str,
         type_name: str,
-        path: List[str],
+        path: list[str],
         depth: int,
-        namespace: Optional[str] = None,
-    ) -> List[FieldIR]:
+        namespace: str | None = None,
+    ) -> list[FieldIR]:
         """Expand a composite (plain-model) field into leaf FieldIRs.
 
         Leaf names are the full field-name path joined with '_' prefixed by
@@ -1706,7 +1702,7 @@ def build_profiles_and_commands(
         positions follow automatically.
         """
         if depth > 8:
-            log.warn(
+            log.warning(
                 "template",
                 "composite expansion depth exceeded",
                 action="expansion_depth_exceeded",
@@ -1714,7 +1710,7 @@ def build_profiles_and_commands(
                 input_type=type_name,
             )
             return []
-        leaves: List[FieldIR] = []
+        leaves: list[FieldIR] = []
         model = _lookup_model(type_name, namespace)
         model_namespace = model.get("namespace", namespace)
         for child in model.get("fields", []):
@@ -1805,7 +1801,7 @@ def build_profiles_and_commands(
             meta["namespace"] = namespace
 
         # Build FieldIR list from raw fields
-        field_irs: List[FieldIR] = []
+        field_irs: list[FieldIR] = []
 
         if template_name and template_type and not reg_fields:
             # Composite template argument (e.g. Timer<timer>): expand into
@@ -1813,7 +1809,7 @@ def build_profiles_and_commands(
             # excluded by the TYPE_MAP gate; the service companion of
             # two-field templates is preserved.
             tt = _strip_qualified(template_type)
-            composite_leaves: List[FieldIR] = []
+            composite_leaves: list[FieldIR] = []
             if _lookup_model(tt, namespace) and tt not in TYPE_MAP:
                 composite_leaves = expand_composite_field("value", tt, [], 0, namespace)
             if composite_leaves:
@@ -2073,7 +2069,7 @@ def build_profiles_and_commands(
                     write_only=(f.meta or {}).get("write_only"),
                 )
         if conflicts:
-            log.warn(
+            log.warning(
                 "command",
                 "conflicting @in/@out field decorators",
                 action="direction_conflict",
@@ -2147,7 +2143,7 @@ def build_profiles_and_commands(
 
         # Log what happened to this register.
         if kind == "register" and unsupported:
-            log.warn(
+            log.warning(
                 "command",
                 "register skipped: unsupported",
                 action="skipped_unsupported",
@@ -2157,7 +2153,7 @@ def build_profiles_and_commands(
                 cause=unsupported_reason,
             )
         elif kind == "template_definition":
-            log.warn(
+            log.warning(
                 "command",
                 "template definition skipped (only instantiations become commands)",
                 action="skipped_template_definition",
@@ -2166,7 +2162,7 @@ def build_profiles_and_commands(
                 kind=kind,
             )
         elif kind == "inherited_base":
-            log.warn(
+            log.warning(
                 "command",
                 "register skipped because it is referenced via @inherit",
                 action="skipped",
@@ -2198,7 +2194,7 @@ def _group_profiles(fam: FamilyIR) -> None:
     Groups by: datatype + unit + scaling + signedness + endianness.
     Each group becomes a ProfileIR; commands reference it via profile_key.
     """
-    groups: Dict[str, List[CommandIR]] = {}
+    groups: dict[str, list[CommandIR]] = {}
 
     for cmd in fam.commands:
         if not cmd.fields:
@@ -2224,7 +2220,7 @@ def _group_profiles(fam: FamilyIR) -> None:
     # Build ProfileIRs and assign profile_key to commands
     for key, cmds in groups.items():
         # Collect all unique fields from commands in this group
-        seen_fields: Dict[str, FieldIR] = {}
+        seen_fields: dict[str, FieldIR] = {}
         for cmd in cmds:
             for f in cmd.fields:
                 if f.name not in seen_fields:

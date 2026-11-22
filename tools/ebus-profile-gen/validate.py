@@ -9,7 +9,8 @@ Validation is derived from two sources:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List
+from collections.abc import Iterable
+from typing import Any
 
 # Mirror of COMMAND_MAX_FIELDS (platformio.ini): the firmware's per-command
 # field table size and the schema's documented 1..13 range
@@ -22,16 +23,16 @@ FIRMWARE_SCHEMA = "firmware-schema"
 EMITTED_OUTPUT = "emitted-output"
 
 
-def _issue(category: str, code: str, message: str) -> Dict[str, str]:
+def _issue(category: str, code: str, message: str) -> dict[str, str]:
     return {"category": category, "code": code, "message": message}
 
 
-def format_issue(issue: Dict[str, str]) -> str:
+def format_issue(issue: dict[str, str]) -> str:
     return f"[{issue['category']}] {issue['message']}"
 
 
-def check_no_trailing_underscores(obj: Any, path: str = "") -> List[str]:
-    issues: List[str] = []
+def check_no_trailing_underscores(obj: Any, path: str = "") -> list[str]:
+    issues: list[str] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
             if k.endswith("_"):
@@ -44,16 +45,15 @@ def check_no_trailing_underscores(obj: Any, path: str = "") -> List[str]:
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
             issues.extend(check_no_trailing_underscores(v, f"{path}[{i}]"))
-    elif isinstance(obj, str):
-        if obj.endswith("_"):
-            issues.append(
-                f"[{EMITTED_OUTPUT}] trailing underscore in string value at {path}"
-            )
+    elif isinstance(obj, str) and obj.endswith("_"):
+        issues.append(
+            f"[{EMITTED_OUTPUT}] trailing underscore in string value at {path}"
+        )
     return issues
 
 
-def check_profile_keys_short(obj: Dict[str, Any]) -> List[str]:
-    issues: List[str] = []
+def check_profile_keys_short(obj: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
     profs = obj.get("profiles") or {}
     if isinstance(profs, dict):
         for k in profs:
@@ -63,10 +63,10 @@ def check_profile_keys_short(obj: Dict[str, Any]) -> List[str]:
 
 
 def validate_log(
-    records: Iterable[Dict[str, Any]],
-    profiles_entries: List[Dict[str, Any]] = None,  # type: ignore[assignment]
-    commands_entries: List[Dict[str, Any]] = None,  # type: ignore[assignment]
-) -> List[str]:
+    records: Iterable[dict[str, Any]],
+    profiles_entries: list[dict[str, Any]] | None = None,
+    commands_entries: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """Turn conversion-log records into a list of human-readable issues.
 
     Any record that indicates the output is not ready to use becomes an issue:
@@ -79,12 +79,12 @@ def validate_log(
 
 
 def validate_log_entries(
-    records: Iterable[Dict[str, Any]],
-    profiles_entries: List[Dict[str, Any]] = None,  # type: ignore[assignment]
-    commands_entries: List[Dict[str, Any]] = None,  # type: ignore[assignment]
-) -> List[Dict[str, str]]:
+    records: Iterable[dict[str, Any]],
+    profiles_entries: list[dict[str, Any]] | None = None,
+    commands_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
     """Return structured validation failures with stable categories and codes."""
-    issues: List[Dict[str, str]] = []
+    issues: list[dict[str, str]] = []
     records = list(records)
 
     for rec in records:
@@ -220,24 +220,23 @@ def validate_log_entries(
                 )
             for field in cmd.get("fields", []):
                 const = field.get("const")
-                if const is not None:
-                    # Fixed wire bytes as hex: non-empty, even length,
-                    # at most the 16-byte data cap.
-                    if (
-                        not isinstance(const, str)
-                        or not const
-                        or len(const) > 32
-                        or len(const) % 2 != 0
-                        or any(c not in "0123456789abcdefABCDEF" for c in const)
-                    ):
-                        issues.append(
-                            _issue(
-                                FIRMWARE_SCHEMA,
-                                "invalid-const",
-                                f"[command] {cmd.get('key')} field "
-                                f"{field.get('name')!r} has invalid const {const!r}",
-                            )
+                # Fixed wire bytes: non-empty hex, even length,
+                # at most the 16-byte data cap.
+                if const is not None and (
+                    not isinstance(const, str)
+                    or not const
+                    or len(const) > 32
+                    or len(const) % 2 != 0
+                    or any(c not in "0123456789abcdefABCDEF" for c in const)
+                ):
+                    issues.append(
+                        _issue(
+                            FIRMWARE_SCHEMA,
+                            "invalid-const",
+                            f"[command] {cmd.get('key')} field "
+                            f"{field.get('name')!r} has invalid const {const!r}",
                         )
+                    )
                 profile = field.get("profile")
                 if profile and profile not in known:
                     issues.append(

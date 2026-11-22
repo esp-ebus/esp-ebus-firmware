@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 STAGES = ("parse", "resolve", "template", "profile", "command", "emit")
 SEVERITIES = ("debug", "info", "warn", "error")
@@ -34,11 +34,11 @@ _LEVELS = {"debug": 0, "info": 1, "warn": 2, "error": 3}
 class ConversionLog:
     """Collects structured records and writes them as JSONL."""
 
-    def __init__(self, path: Optional[str] = None, level: str = "info"):
+    def __init__(self, path: str | None = None, level: str = "info"):
         self.path = path
         self.level = level if level in _LEVELS else "info"
-        self.records: List[Dict[str, Any]] = []
-        self._counts: Dict[str, int] = {s: 0 for s in SEVERITIES}
+        self.records: list[dict[str, Any]] = []
+        self._counts: dict[str, int] = {s: 0 for s in SEVERITIES}
 
     def enabled(self, severity: str) -> bool:
         return _LEVELS.get(severity, 1) >= _LEVELS[self.level]
@@ -48,7 +48,7 @@ class ConversionLog:
             stage = "parse"
         if severity not in SEVERITIES:
             severity = "info"
-        rec: Dict[str, Any] = {"stage": stage, "severity": severity, "reason": reason}
+        rec: dict[str, Any] = {"stage": stage, "severity": severity, "reason": reason}
         rec.update(fields)
         self.records.append(rec)
         self._counts[severity] += 1
@@ -78,9 +78,9 @@ class ConversionLog:
                 fh.write(json.dumps(rec, ensure_ascii=False, sort_keys=True))
                 fh.write("\n")
 
-    def summary(self) -> Dict[str, Any]:
-        by_stage: Dict[str, int] = {}
-        by_classification: Dict[str, int] = {}
+    def summary(self) -> dict[str, Any]:
+        by_stage: dict[str, int] = {}
+        by_classification: dict[str, int] = {}
         for rec in self.records:
             by_stage[rec["stage"]] = by_stage.get(rec["stage"], 0) + 1
             classification = rec.get("classification")

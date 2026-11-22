@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
-from typing import Any, List
 
 # ensure local imports work when run directly
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import emitter
+import mapper
 import resolver
 import tsp_parser
-import mapper
-import emitter
 import validate
 from convlog import ConversionLog
 
@@ -106,7 +104,7 @@ def main() -> int:
     except FileNotFoundError as e:
         print(f"error: tsp file not found: {e}", file=sys.stderr)
         return 2
-    except Exception as e:
+    except (OSError, RuntimeError, ValueError) as e:
         print(f"error: resolving tsp includes failed: {e}", file=sys.stderr)
         return 2
 
@@ -151,8 +149,11 @@ def main() -> int:
                 if comm_m:
                     val_str = comm_m.group(1).strip()
                     default_zz = int(val_str, 0)
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError, ValueError):
+                print(
+                    "warning: could not derive @zz from entry file; using fallback",
+                    file=sys.stderr,
+                )
 
     # Convert to flat entries
     profiles_entries = mapper.profiles_to_flat_entries(fam, log=log)
@@ -177,7 +178,7 @@ def main() -> int:
     _print_summary(log, log_path)
 
     if args.validate:
-        issues: List[str] = []
+        issues: list[str] = []
         for entry in profiles_entries:
             issues.extend(validate.check_no_trailing_underscores(entry))
         issues.extend(validate.check_no_trailing_underscores(commands_entries))

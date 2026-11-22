@@ -19,16 +19,16 @@ import os
 import re
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import mapper  # noqa: E402
-import resolver  # noqa: E402
-import tsp_parser  # noqa: E402
-import validate  # noqa: E402
-from convlog import ConversionLog, NULL_LOG  # noqa: E402
-from model import CommandIR, FamilyIR, FieldIR  # noqa: E402
+import mapper
+import resolver
+import tsp_parser
+import validate
+from convlog import NULL_LOG, ConversionLog
+from model import CommandIR, FamilyIR, FieldIR
 
 _REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,11 +38,11 @@ _EBUSD_ROOT = os.path.join(
 )
 _TYPESPEC_ROOT = os.path.join(_REPO_ROOT, "tools", "ebus-profile-gen", "ebus-typespec")
 
-_failures: List[str] = []
+_failures: list[str] = []
 _checks = 0
 
 
-def family_for(tsp_rel: str) -> Tuple[Dict[str, Any], FamilyIR, List[str]]:
+def family_for(tsp_rel: str) -> tuple[dict[str, Any], FamilyIR, list[str]]:
     """Resolve and parse one tsp input into its raw IR and family."""
     res = resolver.IncludeResolver(_EBUSD_ROOT, _TYPESPEC_ROOT)
     files = res.resolve(tsp_rel)
@@ -51,7 +51,7 @@ def family_for(tsp_rel: str) -> Tuple[Dict[str, Any], FamilyIR, List[str]]:
     return raw, fam, files
 
 
-def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
+def entries_for(tsp_rel: str) -> dict[str, list[dict[str, Any]]]:
     """Run the generate.py pipeline in-process and index entries by name."""
     raw, fam, files = family_for(tsp_rel)
     # Key prefix mirrors generate.py: the tsp stem verbatim, lowercased
@@ -74,7 +74,7 @@ def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
             if comm_m:
                 val_str = comm_m.group(1).strip()
                 default_zz = int(val_str, 0)
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             pass
 
     entries = mapper.commands_to_flat_entries(
@@ -84,7 +84,7 @@ def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
         log=NULL_LOG,
         default_zz=default_zz,
     )
-    by_name: Dict[str, List[Dict[str, Any]]] = {}
+    by_name: dict[str, list[dict[str, Any]]] = {}
     for e in entries:
         by_name.setdefault(e["name"], []).append(e)
     return by_name
@@ -92,7 +92,7 @@ def entries_for(tsp_rel: str) -> Dict[str, List[Dict[str, Any]]]:
 
 def profile_outputs_for(
     tsp_rel: str,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return generated profiles and commands for metadata assertions."""
     raw, fam, _ = family_for(tsp_rel)
     profiles = mapper.profiles_to_flat_entries(fam, log=NULL_LOG)
@@ -103,10 +103,10 @@ def profile_outputs_for(
 
 
 def expect(
-    by_name: Dict[str, List[Dict[str, Any]]],
+    by_name: dict[str, list[dict[str, Any]]],
     name: str,
-    id_hex: Optional[str],
-    wid_hex: Optional[str] = None,
+    id_hex: str | None,
+    wid_hex: str | None = None,
 ) -> None:
     """Assert read/write addressing for a command against ground truth.
 
@@ -118,10 +118,10 @@ def expect(
     _checks += 1
     entries = by_name.get(name)
 
-    def _read_id(e: Dict[str, Any]) -> str:
+    def _read_id(e: dict[str, Any]) -> str:
         return (e.get("pbsb") or "") + (e.get("dx") or "")
 
-    def _write_id(e: Dict[str, Any]) -> str:
+    def _write_id(e: dict[str, Any]) -> str:
         return (e.get("wpbsb") or "") + (e.get("wdx") or "")
 
     try:
@@ -142,7 +142,7 @@ def expect(
 
 
 def expect_absent(
-    by_name: Dict[str, List[Dict[str, Any]]], name: str, why: str = ""
+    by_name: dict[str, list[dict[str, Any]]], name: str, why: str = ""
 ) -> None:
     global _checks
     _checks += 1
@@ -155,7 +155,7 @@ def expect_absent(
         _failures.append(str(exc))
 
 
-def expect_zz(by_name: Dict[str, List[Dict[str, Any]]], name: str, zz_hex: str) -> None:
+def expect_zz(by_name: dict[str, list[dict[str, Any]]], name: str, zz_hex: str) -> None:
     """Assert the destination byte for a command (archived ZZ column)."""
     global _checks
     _checks += 1
@@ -171,7 +171,7 @@ def expect_zz(by_name: Dict[str, List[Dict[str, Any]]], name: str, zz_hex: str) 
 
 
 def expect_positions(
-    by_name: Dict[str, List[Dict[str, Any]]], name: str, positions: List[int]
+    by_name: dict[str, list[dict[str, Any]]], name: str, positions: list[int]
 ) -> None:
     """Assert 1-based byte positions of a command's fields.
 
@@ -193,7 +193,7 @@ def expect_positions(
 
 
 def expect_fields(
-    by_name: Dict[str, List[Dict[str, Any]]], name: str, field_names: List[str]
+    by_name: dict[str, list[dict[str, Any]]], name: str, field_names: list[str]
 ) -> None:
     """Assert the exact field-name list of a command (expansion shape)."""
     global _checks
@@ -211,10 +211,10 @@ def expect_fields(
 
 
 def expect_bits(
-    by_name: Dict[str, List[Dict[str, Any]]],
+    by_name: dict[str, list[dict[str, Any]]],
     name: str,
     field_name: str,
-    bits: Dict[str, int],
+    bits: dict[str, int],
 ) -> None:
     """Assert the `bits` map of a byte-grouped (BI0..BI7) field."""
     global _checks
@@ -241,12 +241,12 @@ def expect_bits(
 
 
 def expect_profile_metadata(
-    profiles: List[Dict[str, Any]],
-    commands: List[Dict[str, Any]],
+    profiles: list[dict[str, Any]],
+    commands: list[dict[str, Any]],
     command_name: str,
-    field_values: Dict[str, Any],
-    profile_values: Dict[str, Any],
-    field_name: Optional[str] = None,
+    field_values: dict[str, Any],
+    profile_values: dict[str, Any],
+    field_name: str | None = None,
 ) -> None:
     """Assert field metadata and its referenced profile carry expected values."""
     global _checks

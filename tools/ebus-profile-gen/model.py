@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 
 @dataclass
@@ -23,37 +23,37 @@ class FieldIR:
     # our target
     our_datatype: str = ""
     # extra
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class ProfileIR:
     key: str
-    fields: List[FieldIR] = field(default_factory=list)
-    meta: Dict[str, Any] = field(default_factory=dict)
+    fields: list[FieldIR] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class CommandIR:
     name: str  # canonical command name
-    profile_key: Optional[str] = None
+    profile_key: str | None = None
     register: str = ""
     rw: str = ""
-    fields: List[FieldIR] = field(default_factory=list)  # inline if not grouped
+    fields: list[FieldIR] = field(default_factory=list)  # inline if not grouped
     unsupported: bool = False
     unsupported_reason: str = ""
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class FamilyIR:
     family: str = ""
-    profiles: Dict[str, ProfileIR] = field(default_factory=dict)
-    commands: List[CommandIR] = field(default_factory=list)
-    meta: Dict[str, Any] = field(default_factory=dict)
+    profiles: dict[str, ProfileIR] = field(default_factory=dict)
+    commands: list[CommandIR] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
-def profile_key_from_fields(fields: List[FieldIR]) -> str:
+def profile_key_from_fields(fields: list[FieldIR]) -> str:
     """Derive a stable, short profile key from field semantics.
 
     TODO: refine grouping (datatype+scaling+unit+signed+endianness+bitfield).

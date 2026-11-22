@@ -25,7 +25,7 @@ from __future__ import annotations
 import copy
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 try:
     from .convlog import NULL_LOG, ConversionLog
@@ -104,7 +104,7 @@ class SourceLines:
     while ``lines.lineno(i)`` returns the 1-based source line for logging.
     """
 
-    def __init__(self, items: List[Tuple[int, str]]):
+    def __init__(self, items: list[tuple[int, str]]):
         self._items = items
 
     def __len__(self) -> int:
@@ -116,16 +116,16 @@ class SourceLines:
     def lineno(self, index: int) -> int:
         return self._items[index][0]
 
-    def raw(self, index: int) -> Tuple[int, str]:
+    def raw(self, index: int) -> tuple[int, str]:
         return self._items[index]
 
 
-def _strip_comments(lines: List[str]) -> SourceLines:
+def _strip_comments(lines: list[str]) -> SourceLines:
     """Remove // line comments and /** ... */ block comments.
 
     Returns a :class:`SourceLines` preserving the original 1-based line numbers.
     """
-    result: List[Tuple[int, str]] = []
+    result: list[tuple[int, str]] = []
     in_block = False
     for lineno, line in enumerate(lines, start=1):
         if in_block:
@@ -155,16 +155,16 @@ def _strip_comments(lines: List[str]) -> SourceLines:
 _NAMESPACE_RE = re.compile(r"^\s*namespace\s+([\w.]+)\s*(\{)?\s*;?\s*$")
 
 
-def _namespace_map(lines: SourceLines) -> Dict[int, str]:
+def _namespace_map(lines: SourceLines) -> dict[int, str]:
     """Map each source line number to its fully-qualified namespace path.
 
     Tracks ``namespace X;`` (file-level) and ``namespace X { ... }`` (block)
     declarations with a brace-depth stack. The result lets the parser attach
     namespace context to models/fields for logging and de-duplication.
     """
-    ns_map: Dict[int, str] = {}
+    ns_map: dict[int, str] = {}
     # Stack of (namespace_name, brace_depth_at_which_it_was_opened)
-    stack: List[Tuple[str, int]] = []
+    stack: list[tuple[str, int]] = []
     file_ns = ""
     depth = 0
 
@@ -198,7 +198,7 @@ def _namespace_map(lines: SourceLines) -> Dict[int, str]:
     return ns_map
 
 
-def _split_template_params(params_str: str) -> List[str]:
+def _split_template_params(params_str: str) -> list[str]:
     """Split template parameter list by commas, respecting nested <> and quotes.
 
     Examples:
@@ -242,7 +242,7 @@ def _split_template_params(params_str: str) -> List[str]:
     return parts
 
 
-def _parse_template_params(params_str: str) -> List[Dict[str, str]]:
+def _parse_template_params(params_str: str) -> list[dict[str, str]]:
     """Parse TypeSpec template parameter list into structured parameters.
 
     Handles:
@@ -287,7 +287,7 @@ def _parse_template_params(params_str: str) -> List[Dict[str, str]]:
     return params
 
 
-def _parse_hex_or_int(s: str) -> Optional[int]:
+def _parse_hex_or_int(s: str) -> int | None:
     """Parse a hex (0x..) or decimal string to int."""
     s = s.strip()
     if _HEX_RE.match(s):
@@ -297,7 +297,7 @@ def _parse_hex_or_int(s: str) -> Optional[int]:
     return None
 
 
-def _parse_float(s: str) -> Optional[float]:
+def _parse_float(s: str) -> float | None:
     """Parse a float string."""
     s = s.strip()
     try:
@@ -306,7 +306,7 @@ def _parse_float(s: str) -> Optional[float]:
         return None
 
 
-def _parse_number(s: str) -> Optional[Union[int, float]]:
+def _parse_number(s: str) -> int | float | None:
     """Parse a signed decimal, float, or hexadecimal numeric literal."""
     value = s.strip()
     if _HEX_RE.match(value.lstrip("+-")):
@@ -325,11 +325,11 @@ def _short_path(path: str) -> str:
         return os.path.basename(path)
 
 
-def _parse_decorator_args(args_str: Optional[str]) -> List[str]:
+def _parse_decorator_args(args_str: str | None) -> list[str]:
     """Parse decorator arguments, splitting by comma, respecting quotes."""
     if not args_str:
         return []
-    args: List[str] = []
+    args: list[str] = []
     current = ""
     in_quote = False
     quote_char = ""
@@ -353,21 +353,21 @@ def _parse_decorator_args(args_str: Optional[str]) -> List[str]:
 
 
 def _raw_model_field(
-    name: str, type_name: str, decorators: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    name: str, type_name: str, decorators: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Raw {name, type} pair for the models registry, keeping decorators.
 
     Composite expansion (mapper.expand_composite_field) resolves metadata
     from these pairs, so decorators must survive here (`@constValue`,
     `@maxLength`, ...); without them they are silently dropped.
     """
-    field: Dict[str, Any] = {"name": name, "type": type_name}
+    field: dict[str, Any] = {"name": name, "type": type_name}
     if decorators:
         field["decorators"] = decorators
     return field
 
 
-def _split_leading_decorators(line: str) -> Tuple[List[Dict[str, Any]], str]:
+def _split_leading_decorators(line: str) -> tuple[list[dict[str, Any]], str]:
     """Split leading ``@name(args)`` tokens off a source line.
 
     Handles the ebusd-configuration style where a field shares its line
@@ -376,7 +376,7 @@ def _split_leading_decorators(line: str) -> Tuple[List[Dict[str, Any]], str]:
     decorator-only line yields an empty remainder so callers can fall
     back to the full-line decorator handling.
     """
-    decorators: List[Dict[str, Any]] = []
+    decorators: list[dict[str, Any]] = []
     rest = line
     while True:
         m = _LEADING_DEC_RE.match(rest)
@@ -389,7 +389,7 @@ def _split_leading_decorators(line: str) -> Tuple[List[Dict[str, Any]], str]:
     return decorators, rest
 
 
-def _resolve_constant(name: str, aliases: Dict[str, str]) -> Optional[int]:
+def _resolve_constant(name: str, aliases: dict[str, str]) -> int | None:
     """Resolve a constant name or hex/int string to an int value."""
     s = name.strip()
     if _HEX_RE.match(s):
@@ -403,28 +403,34 @@ def _resolve_constant(name: str, aliases: Dict[str, str]) -> Optional[int]:
 
 
 class TspParser:
-    def __init__(self, files: List[str], log: Optional[ConversionLog] = None):
+    def __init__(self, files: list[str], log: ConversionLog | None = None):
         self.files = [os.path.abspath(f) for f in files]
         self.log = log if log is not None else NULL_LOG
 
-    def parse(self) -> Dict[str, Any]:
+    def parse(self) -> dict[str, Any]:
         """Parse tsp files and return a raw IR dict.
 
         Returns:
             dict with keys: registers, fields, types, enums, scalars, aliases, includes
         """
         # First pass: collect all aliases from all files
-        aliases: Dict[str, str] = {}
-        all_file_contents: List[Tuple[str, str]] = []
+        aliases: dict[str, str] = {}
+        all_file_contents: list[tuple[str, str]] = []
         for fpath in self.files:
             try:
                 with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
                     content = fh.read()
-            except Exception:
+            except OSError as exc:
+                self.log.warn(
+                    "parse",
+                    "unable to read TypeSpec input",
+                    source=fpath,
+                    error=str(exc),
+                )
                 continue
             all_file_contents.append((fpath, content))
             lines = _strip_comments(content.splitlines())
-            in_union: Optional[str] = None
+            in_union: str | None = None
             union_depth = 0
             for i in range(len(lines)):
                 am = _ALIAS_RE.match(lines[i])
@@ -452,7 +458,7 @@ class TspParser:
                     in_union = None
 
         # Second pass: parse all files with the complete alias map
-        ir: Dict[str, Any] = {
+        ir: dict[str, Any] = {
             "registers": [],
             "fields": [],
             "types": {},
@@ -472,14 +478,14 @@ class TspParser:
         # tails, and assemble effective payload fields. read_tail/write_tail
         # hold the D bytes contributed by @base and inherited ancestors; a
         # register's own @ext bytes are appended by the mapper at emission.
-        by_name: Dict[str, List[int]] = {}
+        by_name: dict[str, list[int]] = {}
         for idx, reg in enumerate(ir["registers"]):
             by_name.setdefault(reg["name"], []).append(idx)
-        parent_resolution_cache: Dict[Tuple[int, str], Optional[Dict[str, Any]]] = {}
+        parent_resolution_cache: dict[tuple[int, str], dict[str, Any] | None] = {}
 
         def resolve_parent(
-            child: Dict[str, Any], parent_name: str
-        ) -> Optional[Dict[str, Any]]:
+            child: dict[str, Any], parent_name: str
+        ) -> dict[str, Any] | None:
             """Locate a parent register for @inherit resolution.
 
             Model names may collide across files (e.g. wi_1 in hcmode_inc,
@@ -682,12 +688,12 @@ class TspParser:
                     merged["meta"]["direction_conflict"] = True
             return merged
 
-        def resolve_fields(reg: Dict[str, Any]) -> list[dict[str, Any]]:
+        def resolve_fields(reg: dict[str, Any]) -> list[dict[str, Any]]:
             reg_id = id(reg)
             if reg_id in resolved_fields:
                 return resolved_fields[reg_id]
             if reg_id in resolving_fields:
-                self.log.warn(
+                self.log.warning(
                     "parse",
                     "cyclic @inherit payload fields",
                     model=reg.get("name"),
@@ -733,10 +739,10 @@ class TspParser:
     def _parse_lines(
         self,
         lines: SourceLines,
-        ir: Dict[str, Any],
+        ir: dict[str, Any],
         fpath: str,
-        aliases: Dict[str, str],
-        ns_map: Optional[Dict[int, str]] = None,
+        aliases: dict[str, str],
+        ns_map: dict[int, str] | None = None,
     ) -> None:
         """Parse a list of preprocessed lines into the IR."""
         # The local ebus-typespec package is included only so the first pass
@@ -755,10 +761,7 @@ class TspParser:
 
             # Skip using/import/namespace/union statements
             if (
-                line.startswith("using ")
-                or line.startswith('import "')
-                or line.startswith("namespace ")
-                or line.startswith("union ")
+                line.startswith(("using ", 'import "', "namespace ", "union "))
             ):
                 i += 1
                 continue
@@ -771,7 +774,7 @@ class TspParser:
             # Check for decorator
             m = _DECORATOR_RE.match(line)
             if m:
-                decorators: List[Dict[str, Any]] = []
+                decorators: list[dict[str, Any]] = []
                 while i < len(lines):
                     found = False
                     for dm in _DECORATOR_ANY_RE.finditer(lines[i]):
@@ -1078,14 +1081,14 @@ class TspParser:
             i += 1
 
     @staticmethod
-    def _split_model_fields(body: str) -> List[Dict[str, str]]:
+    def _split_model_fields(body: str) -> list[dict[str, str]]:
         """Split inline `{ a: T; b: U }` body text into raw field pairs."""
-        fields: List[Dict[str, str]] = []
+        fields: list[dict[str, str]] = []
         for token in body.split(";"):
             token = token.strip()
             if not token:
                 continue
-            decorators: List[Dict[str, Any]] = []
+            decorators: list[dict[str, Any]] = []
             if token.startswith("@"):
                 decorators, token = _split_leading_decorators(token)
                 token = token.strip()
@@ -1097,10 +1100,10 @@ class TspParser:
     @staticmethod
     def _parse_plain_model_body(
         lines: SourceLines, start_i: int
-    ) -> Tuple[List[Dict[str, str]], int]:
+    ) -> tuple[list[dict[str, str]], int]:
         """Collect raw field pairs of a plain model body; returns (fields, next_i)."""
-        fields: List[Dict[str, str]] = []
-        pending: List[Dict[str, Any]] = []
+        fields: list[dict[str, str]] = []
+        pending: list[dict[str, Any]] = []
         i = start_i
         while i < len(lines):
             line = lines[i]
@@ -1142,19 +1145,19 @@ class TspParser:
         self,
         lines: SourceLines,
         start_i: int,
-        model_decorators: List[Dict[str, Any]],
+        model_decorators: list[dict[str, Any]],
         model_name: str,
-        ir: Dict[str, Any],
+        ir: dict[str, Any],
         fpath: str,
-        aliases: Dict[str, str],
+        aliases: dict[str, str],
         inline_fields: str = "",
         body_on_same_line: bool = False,
         model_line: int = 0,
         namespace: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Parse a model block { field: Type; ... } and return register info."""
         i = start_i
-        fields: List[Dict[str, Any]] = []
+        fields: list[dict[str, Any]] = []
         decorators = list(model_decorators)
 
         # Parse inline fields from the same line (e.g. model whwc {field: Type;})
@@ -1228,7 +1231,7 @@ class TspParser:
             # Decorator before a field
             dm = _DECORATOR_RE.match(line)
             if dm:
-                field_decorators: List[Dict[str, Any]] = []
+                field_decorators: list[dict[str, Any]] = []
                 while i < len(lines):
                     dm = _DECORATOR_RE.match(lines[i])
                     if not dm:
@@ -1240,7 +1243,7 @@ class TspParser:
 
                 if i < len(lines):
                     fm = _FIELD_RE.match(lines[i])
-                    trailing_decorators: List[Dict[str, Any]] = []
+                    trailing_decorators: list[dict[str, Any]] = []
                     if fm is None and lines[i].lstrip().startswith("@"):
                         # The field line itself starts with another
                         # decorator: `@out` NL `@maxLength(1) ign: IGN;`
@@ -1371,9 +1374,9 @@ class TspParser:
         self,
         lines: SourceLines,
         start_i: int,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Parse an enum block. Returns (entries, next_index)."""
-        entries: List[Dict[str, Any]] = []
+        entries: list[dict[str, Any]] = []
         i = start_i
         while i < len(lines):
             line = lines[i]
@@ -1396,15 +1399,15 @@ class TspParser:
         self,
         name: str,
         ebus_type: str,
-        decorators: List[Dict[str, Any]],
-        ir: Dict[str, Any],
+        decorators: list[dict[str, Any]],
+        ir: dict[str, Any],
         fpath: str,
         model: str = "",
         namespace: str = "",
         line_no: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a field dict from name, type, and decorators."""
-        field: Dict[str, Any] = {
+        field: dict[str, Any] = {
             "name": name,
             "ebus_type": ebus_type,
             "unit": "",
@@ -1433,10 +1436,7 @@ class TspParser:
                     field["unit"] = args[0].strip('"').strip("'")
                     if len(args) > 1:
                         field["meta"]["unit_category"] = args[1].strip('"').strip("'")
-            elif dname == "divisor":
-                if args:
-                    field["factor"] = args[0]
-            elif dname == "factor":
+            elif dname == "divisor" or dname == "factor":
                 if args:
                     field["factor"] = args[0]
             elif dname == "step":
@@ -1485,9 +1485,8 @@ class TspParser:
             elif dname == "constValue":
                 if args:
                     field["meta"]["const_value"] = args[0]
-            elif dname == "maxLength":
-                if args:
-                    field["meta"]["max_length"] = args[0]
+            elif dname == "maxLength" and args:
+                field["meta"]["max_length"] = args[0]
 
         field["our_datatype"] = self._map_type(ebus_type)
         field["signed"] = ebus_type.startswith(("S", "s"))
@@ -1509,16 +1508,16 @@ class TspParser:
 
     def _build_register_from_decorators(
         self,
-        decorators: List[Dict[str, Any]],
+        decorators: list[dict[str, Any]],
         name: str,
-        ir: Dict[str, Any],
+        ir: dict[str, Any],
         fpath: str,
-        aliases: Dict[str, str],
+        aliases: dict[str, str],
         model_line: int = 0,
         namespace: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a register (command) dict from model decorators."""
-        register: Dict[str, Any] = {
+        register: dict[str, Any] = {
             "name": name,
             "rw": "read",
             "fields": [],
@@ -1558,7 +1557,7 @@ class TspParser:
                         register["meta"]["pb"] = pb
                     if sb is not None:
                         register["meta"]["sb"] = sb
-                    tail: List[int] = []
+                    tail: list[int] = []
                     for a in args[2:]:
                         v = _resolve_constant(a, aliases)
                         if v is not None:
@@ -1575,7 +1574,7 @@ class TspParser:
             elif dname == "ext":
                 # ext(dd...): variadic D-tail bytes appended after the
                 # base/inherited tail ($ext(...dd) in decorators.ts).
-                ext_bytes: List[int] = []
+                ext_bytes: list[int] = []
                 for a in args:
                     v = _resolve_constant(a, aliases)
                     if v is not None:
@@ -1652,13 +1651,12 @@ class TspParser:
             elif dname == "auth":
                 if args:
                     register["meta"]["auth"] = args[0].strip('"').strip("'")
-            elif dname == "condition":
-                if args:
-                    register["meta"]["condition"] = args
-                    register["unsupported"] = True
-                    register["unsupported_reason"] = (
-                        "@condition command emission is unsupported"
-                    )
+            elif dname == "condition" and args:
+                register["meta"]["condition"] = args
+                register["unsupported"] = True
+                register["unsupported_reason"] = (
+                    "@condition command emission is unsupported"
+                )
 
         self.log.debug(
             "parse",
@@ -1676,14 +1674,14 @@ class TspParser:
         self,
         name: str,
         base_type: str,
-        decorators: List[Dict[str, Any]],
-        ir: Dict[str, Any],
+        decorators: list[dict[str, Any]],
+        ir: dict[str, Any],
         fpath: str,
         line_no: int = 0,
         namespace: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a scalar dict, capturing decorator metadata (unit/min/max/...)."""
-        scalar: Dict[str, Any] = {
+        scalar: dict[str, Any] = {
             "name": name,
             "base_type": base_type,
             "file": fpath,
@@ -1720,7 +1718,7 @@ class TspParser:
 
         existing = ir["scalars"].get(name)
         if existing is not None and existing.get("base_type") != base_type:
-            self.log.warn(
+            self.log.warning(
                 "parse",
                 "scalar redefined with a different base type; first (nearest) definition wins",
                 source=_short_path(fpath),
@@ -1748,9 +1746,9 @@ class TspParser:
         self,
         template_name: str,
         type_param: str,
-        ir: Dict[str, Any],
-        aliases: Dict[str, str],
-    ) -> List[Dict[str, Any]]:
+        ir: dict[str, Any],
+        aliases: dict[str, str],
+    ) -> list[dict[str, Any]]:
         """Build field list for a template model.
 
         For known templates (in _SINGLE_FIELD_TEMPLATES, _TWO_FIELD_TEMPLATES),
@@ -1758,7 +1756,7 @@ class TspParser:
         For other templates, looks up the template definition in ir['registers']
         and copies all fields with parameter substitution.
         """
-        fields: List[Dict[str, Any]] = []
+        fields: list[dict[str, Any]] = []
 
         if template_name in _SINGLE_FIELD_TEMPLATES:
             fields.append(

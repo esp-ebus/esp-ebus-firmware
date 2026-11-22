@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import re
-from typing import List, Optional, Set
 
 _IMPORT_RE = re.compile(r'^\s*import\s+"([^"]+)"\s*;?\s*$', re.MULTILINE)
 
@@ -13,20 +12,20 @@ _TYPESPEC_IMPORT = "@ebusd/ebus-typespec"
 
 
 class IncludeResolver:
-    def __init__(self, ebusd_root: str, typespec_root: Optional[str] = None):
+    def __init__(self, ebusd_root: str, typespec_root: str | None = None):
         self.ebusd_root = os.path.abspath(ebusd_root)
         self.typespec_root = (
             os.path.abspath(typespec_root) if typespec_root else None
         )
 
-    def resolve(self, tsp_path: str) -> List[str]:
+    def resolve(self, tsp_path: str) -> list[str]:
         """Resolve tsp_path and its transitive includes relative to ebusd_root.
 
         Returns list of absolute file paths in order (entry first, then includes).
         """
         entry = self._abs(tsp_path)
-        seen: Set[str] = set()
-        order: List[str] = []
+        seen: set[str] = set()
+        order: list[str] = []
         self._walk(entry, seen, order)
         # Reverse to get post-order traversal: templates before files that use them
         return list(reversed(order))
@@ -40,7 +39,7 @@ class IncludeResolver:
             return os.path.abspath(p)
         return os.path.abspath(os.path.join(self.ebusd_root, p))
 
-    def _walk(self, path: str, seen: Set[str], order: List[str]) -> None:
+    def _walk(self, path: str, seen: set[str], order: list[str]) -> None:
         if not os.path.exists(path):
             raise FileNotFoundError(path)
         ap = os.path.abspath(path)
@@ -53,7 +52,7 @@ class IncludeResolver:
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read()
-        except Exception:
+        except OSError:
             return
 
         file_dir = os.path.dirname(ap)
