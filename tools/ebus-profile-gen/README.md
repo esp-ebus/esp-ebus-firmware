@@ -237,6 +237,19 @@ outside the 2-6 byte range), referenced profiles that do not exist, and
 trailing underscores — treating the generator output as ready to use only when
 none of those are present.
 
+Validation failures are classified separately:
+
+- `unsupported-typespec` — a source construct or datatype has no firmware-safe
+  conversion, such as unsupported field types or decorators.
+- `firmware-schema` — a command can be converted in principle, but its address
+  or field count exceeds firmware limits.
+- `emitted-output` — the generated JSON itself violates a cross-check or emits
+  an unresolvable profile/reference.
+
+This distinction is also used by `test_validation_failures.py`, so skipped
+unsupported registers, ID-length violations, and 14-field commands remain
+representative fail-closed checks.
+
 ## Testing
 
 `test_golden_ids.py` runs the full resolve→parse→map pipeline in-process and
@@ -247,5 +260,6 @@ truth (concatenation model, BI gate, write-only `id: ""`):
 python3 tools/ebus-profile-gen/test_golden_ids.py
 python3 tools/ebus-profile-gen/test_profile_mappings.py
 python3 tools/ebus-profile-gen/test_ha_profile_assignment.py
+python3 tools/ebus-profile-gen/test_validation_failures.py
 ```
 
