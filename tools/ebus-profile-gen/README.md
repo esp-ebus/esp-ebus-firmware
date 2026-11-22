@@ -23,7 +23,7 @@ tools/ebus-profile-gen/
 ├── generate.py                  # generator entry point
 ├── resolver.py                  # include/template resolution
 ├── tsp_parser.py                # minimal TypeSpec subset parser
-├── model.py                     # internal IR (FieldIR/ProfileIR/CommandIR/FamilyIR)
+├── model.py                     # internal IR (FieldIR/CommandIR/FamilyIR)
 ├── mapper.py                    # tsp → our schema + profile grouping
 ├── emitter.py                   # write raw generated JSON
 ├── validate.py                  # enforce constraints
@@ -184,6 +184,14 @@ Important boundaries:
   commands. `@in` fields belong to read payloads, `@out` fields belong to write
   payloads; an optional `writeOnly` argument keeps a field on the requested side
   (`true`) or read side (`false`).
+- `@poll(value)` / `@auth(value)` are parsed and stored on the command but are
+  **not reflected in emitted output**: `interval` stays `0` (passive) and
+  `master` stays `false`. Poll priority isn't implemented in the runtime, and an
+  auth level string (e.g. `'install'`) doesn't map to the master/slave value
+  location.
+- `@id(...)` without `@base`/`@inherit` still produces a valid id/wid: the full
+  id bytes carried by `@id` (MF PB D...) are consumed as an addressing fallback.
+  `@base`/`@inherit` tails take precedence when present.
 - Profile mappings cover only recognized type/unit/scaling combinations.
   HA profiles are assigned for recognized sensor units, clear total/humidity
   field names, boolean enums, and bit maps; ambiguous semantics remain empty.

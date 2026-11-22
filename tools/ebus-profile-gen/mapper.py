@@ -1588,7 +1588,7 @@ def build_profiles_and_commands(
     """Build FamilyIR from raw tsp parser IR.
 
     Converts parser-extracted registers (commands) and fields into
-    FamilyIR with ProfileIR grouping and CommandIR entries.
+    FamilyIR with CommandIR entries.
     """
     log = log if log is not None else NULL_LOG
     fam = FamilyIR()

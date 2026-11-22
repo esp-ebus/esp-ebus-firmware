@@ -28,13 +28,6 @@ class FieldIR:
 
 
 @dataclass
-class ProfileIR:
-    key: str
-    fields: list[FieldIR] = field(default_factory=list)
-    meta: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
 class CommandIR:
     name: str  # canonical command name
     profile_key: str | None = None
@@ -49,7 +42,6 @@ class CommandIR:
 @dataclass
 class FamilyIR:
     family: str = ""
-    profiles: dict[str, ProfileIR] = field(default_factory=dict)
     commands: list[CommandIR] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
