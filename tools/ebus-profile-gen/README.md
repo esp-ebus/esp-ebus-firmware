@@ -72,7 +72,7 @@ By default the CLI writes raw generated output to `tools/ebus-profile-gen/genera
 - `<tsp_stem>.profiles.json` — flat entries `{name, datatype, unit, divider, digits, min, max}` matching the `profiles/data_profiles.json` schema. These can be copied to `profiles/data_profiles_user.json` (the overlay) at compile time.
 - `<tsp_stem>.json` — command entries matching `config/simulation.json` schema:
   `{key, name, zz, pbsb, [dx], [nn], wpbsb, [wdx], interval, master, fields: [{name, profile, position, ha_profile, [bits], [const]}]}`.
-  `wpbsb`/`wdx` are omitted for read-only commands, `interval` defaults to 0 (passive only), `master` defaults to false, `ha_profile` is empty — fill these in by hand (exception: fields carrying a `bits` map get `ha_profile: "binary_sensor"` automatically — one HA binary_sensor per bit).
+  `wpbsb`/`wdx` are omitted for read-only commands, `interval` defaults to 0 (passive only), and `master` defaults to false. Recognized sensor units and unambiguous boolean enums receive semantic `ha_profile` values; fields with ambiguous or unsupported semantics remain empty. Bit-map fields receive `binary_sensor` automatically — one HA entity per bit.
   `bits` appears on byte-grouped bitfield fields (consecutive `BI0`–`BI7` children collapsed into one `UINT8` byte) as a map of sub-field name to bit index within that byte.
   `zz` is the destination byte. An explicit `@zz` on the command or an
   inherited model takes precedence; otherwise it comes from `--zz`, a leading
@@ -185,8 +185,8 @@ Important boundaries:
   payloads; an optional `writeOnly` argument keeps a field on the requested side
   (`true`) or read side (`false`).
 - Profile mappings cover only recognized type/unit/scaling combinations.
-  `ha_profile` defaults to empty; bit-map fields are assigned
-  `binary_sensor`.
+  HA profiles are assigned for recognized sensor units, clear total/humidity
+  field names, boolean enums, and bit maps; ambiguous semantics remain empty.
 - Unit-aware mappings include temperature/K, minutes, seconds, kWh,
   percentage, RPM, and hours variants used by the corpus. Remaining unit
   combinations fall back to datatype profiles.
@@ -246,5 +246,6 @@ truth (concatenation model, BI gate, write-only `id: ""`):
 ```bash
 python3 tools/ebus-profile-gen/test_golden_ids.py
 python3 tools/ebus-profile-gen/test_profile_mappings.py
+python3 tools/ebus-profile-gen/test_ha_profile_assignment.py
 ```
 

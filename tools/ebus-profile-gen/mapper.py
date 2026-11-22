@@ -892,6 +892,125 @@ def _profile_number(value: Any, default: int = 0) -> Union[int, float]:
         return default
 
 
+HA_SENSOR_UNIT_PROFILES: Dict[str, str] = {
+    "°c": "sensor_temperature",
+    "c": "sensor_temperature",
+    "celsius": "sensor_temperature",
+    "k": "sensor_temperature",
+    "bar": "sensor_pressure",
+    "mbar": "sensor_pressure",
+    "pa": "sensor_pressure",
+    "hpa": "sensor_pressure",
+    "kpa": "sensor_pressure",
+    "l/min": "sensor_flow",
+    "lpm": "sensor_flow",
+    "l/h": "sensor_flow",
+    "m3/h": "sensor_flow",
+    "m³/h": "sensor_flow",
+    "l/s": "sensor_flow",
+    "w": "sensor_power",
+    "kw": "sensor_power",
+    "wh": "sensor_energy",
+    "kwh": "sensor_energy",
+    "mwh": "sensor_energy",
+    "v": "sensor_voltage",
+    "mv": "sensor_voltage",
+    "a": "sensor_current",
+    "ma": "sensor_current",
+    "hz": "sensor_frequency",
+    "khz": "sensor_frequency",
+    "dbm": "sensor_rssi",
+}
+
+_BOOLEAN_ON_LABELS = {
+    "active",
+    "enabled",
+    "open",
+    "on",
+    "present",
+    "running",
+    "true",
+    "yes",
+}
+_BOOLEAN_OFF_LABELS = {
+    "close",
+    "closed",
+    "disabled",
+    "false",
+    "inactive",
+    "missing",
+    "off",
+    "no",
+    "stopped",
+}
+
+
+def _is_binary_enum(meta: Dict[str, Any]) -> bool:
+    entries = meta.get("values", [])
+    if not isinstance(entries, list) or len(entries) != 2:
+        return False
+
+    states: Dict[str, int] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False
+        label = re.sub(r"[^a-z]", "", str(entry.get("key", "")).lower())
+        if label not in _BOOLEAN_ON_LABELS and label not in _BOOLEAN_OFF_LABELS:
+            return False
+        value = entry.get("value")
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False
+        states[label] = value
+
+    on_values = [
+        value for label, value in states.items() if label in _BOOLEAN_ON_LABELS
+    ]
+    off_values = [
+        value for label, value in states.items() if label in _BOOLEAN_OFF_LABELS
+    ]
+    return (
+        len(on_values) == len(off_values) == 1
+        and on_values[0] == 1
+        and off_values[0] == 0
+    )
+
+
+def _semantic_ha_profile(field: FieldIR, rw: str, command_name: str = "") -> str:
+    """Choose a known HA profile only when the field semantics are clear."""
+    meta = field.meta or {}
+    if meta.get("bits"):
+        return "binary_sensor"
+
+    if _is_binary_enum(meta):
+        if rw == "write":
+            return "switch"
+        if rw == "read":
+            return "binary_sensor"
+
+    if rw != "read":
+        return ""
+
+    unit = (field.unit or meta.get("unit") or "").strip().lower()
+    semantic_name = re.sub(
+        r"([a-z0-9])([A-Z])", r"\1 \2", f"{command_name} {field.name}"
+    )
+    name_tokens = set(re.findall(r"[a-z0-9]+", semantic_name.lower()))
+    if unit in ("%", "percent"):
+        if "rh" in name_tokens or any(
+            "humid" in token for token in name_tokens
+        ):
+            return "sensor_humidity"
+        return ""
+
+    profile = HA_SENSOR_UNIT_PROFILES.get(unit)
+    if profile:
+        return profile
+
+    if name_tokens & {"sum", "total"}:
+        return "sensor_total"
+    return ""
+
+
 def _profile_signature(field: FieldIR) -> Tuple[Any, ...]:
     """Identify a profile by all properties represented in data_profiles."""
     meta = field.meta or {}
@@ -1307,9 +1426,7 @@ def commands_to_flat_entries(
                 "name": f.name,
                 "profile": profile,
                 "position": byte_offset + 1,
-                # Bits fields are read-only bit rows in HA: one
-                # binary_sensor per bit (values payload expands the byte).
-                "ha_profile": "binary_sensor" if f.meta.get("bits") else "",
+                "ha_profile": _semantic_ha_profile(f, c.rw, c.name),
             }
 
             # Add min/max if present
@@ -1495,6 +1612,10 @@ def build_profiles_and_commands(
                 meta["max_length"] = scalar["max_length"]
 
             t = _strip_qualified(scalar.get("base_type", ""))
+
+        enum_name = meta.get("values_enum")
+        if isinstance(enum_name, str) and enum_name in enums:
+            meta["values"] = enums[enum_name].get("entries", [])
 
         # Check if it's an enum
         if t in enums:
