@@ -15,13 +15,13 @@ class Emitter:
     def emit_profiles(self, entries: list[dict[str, Any]]) -> None:
         _ensure_parent_dir(self.profiles_out_path)
         with open(self.profiles_out_path, "w", encoding="utf-8") as f:
-            json.dump(entries, f, indent=2)
+            json.dump(entries, f, indent=2, sort_keys=True)
             f.write("\n")
 
     def emit_commands(self, commands: list[dict[str, Any]]) -> None:
         _ensure_parent_dir(self.commands_out_path)
         with open(self.commands_out_path, "w", encoding="utf-8") as f:
-            json.dump(commands, f, indent=2)
+            json.dump(commands, f, indent=2, sort_keys=True)
             f.write("\n")
 
 

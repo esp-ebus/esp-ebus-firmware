@@ -7,10 +7,10 @@ from typing import Any
 
 try:
     from .convlog import NULL_LOG
-    from .model import CommandIR, FamilyIR, FieldIR, ProfileIR
+    from .model import CommandIR, FamilyIR, FieldIR
 except ImportError:
     from convlog import NULL_LOG
-    from model import CommandIR, FamilyIR, FieldIR, ProfileIR
+    from model import CommandIR, FamilyIR, FieldIR
 
 
 # Mapping from eBUS TypeSpec base types to our datatypes
@@ -1339,6 +1339,15 @@ def commands_to_flat_entries(
             if zz not in valid_source:
                 source_zz = (zz - 5) & 0xFF
                 if source_zz in valid_source:
+                    log.warn(
+                        "command",
+                        "@write(true) source-pendant heuristic applied",
+                        action="write_source_pendant_heuristic",
+                        name=c.name,
+                        zz=f"{zz:02x}",
+                        source_zz=f"{source_zz:02x}",
+                        classification="defaulted",
+                    )
                     zz = source_zz
                 else:
                     c.unsupported = True
@@ -1378,16 +1387,23 @@ def commands_to_flat_entries(
         mf_hex = f"{mf:02x}"
         read_prefix = f"{mf_hex}{meta.get('read_pb', pb):02x}"
         write_prefix = f"{mf_hex}{meta.get('write_pb', pb):02x}"
-        id_hex = (
-            read_prefix + _hex(read_tail) + _hex(ext_bytes)
-            if read_tail is not None
-            else ""
-        )
-        wid_hex = (
-            write_prefix + _hex(write_tail) + _hex(ext_bytes)
-            if write_tail is not None
-            else ""
-        )
+        # Fall back to the full id carried by `@id(...)` (MF + PB + D tail)
+        # when no `@base`/`@inherit` tail was resolved, so an `@id`-only
+        # command still gets a valid id/wid instead of failing validation.
+        # `@base`/`@inherit` tails take precedence when present.
+        register_id = c.register or ""
+        if read_tail is not None:
+            id_hex = read_prefix + _hex(read_tail) + _hex(ext_bytes)
+        elif register_id and c.rw != "write":
+            id_hex = register_id
+        else:
+            id_hex = ""
+        if write_tail is not None:
+            wid_hex = write_prefix + _hex(write_tail) + _hex(ext_bytes)
+        elif register_id and c.rw == "write":
+            wid_hex = register_id
+        else:
+            wid_hex = ""
         # Explicit read NN only when it differs from the derived len(id)-2
         # and the command actually has a read side.
         nn_hex = f"{nn_read:02x}" if (nn_read != 3 and id_hex) else ""
@@ -2202,54 +2218,4 @@ def build_profiles_and_commands(
                 fields=len(field_irs),
             )
 
-    # Group commands into profiles by canonical field semantics
-    _group_profiles(fam)
-
     return fam
-
-
-def _group_profiles(fam: FamilyIR) -> None:
-    """Group commands into profiles by canonical field semantics.
-
-    Groups by: datatype + unit + scaling + signedness + endianness.
-    Each group becomes a ProfileIR; commands reference it via profile_key.
-    """
-    groups: dict[str, list[CommandIR]] = {}
-
-    for cmd in fam.commands:
-        if not cmd.fields:
-            key = "no_fields"
-        else:
-            # Derive profile key from first field's semantics
-            f = cmd.fields[0]
-            key_parts = [
-                f.our_datatype or f.ebus_type or "x",
-                f.unit or "",
-                f.factor or "",
-                "s" if f.signed else "u",
-                "be" if f.big_endian else "le",
-            ]
-            key = "_".join(p for p in key_parts if p)
-            if len(key) > 24:
-                key = key[:24].rstrip("_")
-
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(cmd)
-
-    # Build ProfileIRs and assign profile_key to commands
-    for key, cmds in groups.items():
-        # Collect all unique fields from commands in this group
-        seen_fields: dict[str, FieldIR] = {}
-        for cmd in cmds:
-            for f in cmd.fields:
-                if f.name not in seen_fields:
-                    seen_fields[f.name] = f
-
-        profile_fields = list(seen_fields.values())
-        profile_ir = ProfileIR(key=key, fields=profile_fields, meta={})
-        fam.profiles[key] = profile_ir
-
-        # Assign profile_key to commands in this group
-        for cmd in cmds:
-            cmd.profile_key = key

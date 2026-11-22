@@ -36,7 +36,7 @@ def main() -> int:
     )
     p.add_argument(
         "--key-prefix",
-        help="key prefix for command keys (default: derived from tsp filename, e.g. 08.ehp.tsp → ehp_)",
+        help="key prefix for command keys (default: full lowercased tsp stem with trailing underscore, e.g. 08.ehp.tsp → 08.ehp_)",
     )
     p.add_argument(
         "--out-generated",
@@ -194,6 +194,11 @@ def main() -> int:
         issues: list[str] = []
         for entry in profiles_entries:
             issues.extend(validate.check_no_trailing_underscores(entry))
+        issues.extend(
+            validate.check_profile_keys_short(
+                {"profiles": {e.get("name", ""): e for e in profiles_entries}}
+            )
+        )
         issues.extend(validate.check_no_trailing_underscores(commands_entries))
         issues.extend(
             validate.validate_log(log.records, profiles_entries, commands_entries)
