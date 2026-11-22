@@ -158,52 +158,31 @@ python3 tools/ebus-profile-gen/generate.py \
   --zz 52
 ```
 
-## Current Status and Known Issues
+## Conversion scope
 
-**Status: Parser and command format fixed, profile mapping needs refinement**
+The generator implements a subset of the ebusd TypeSpec model and emits
+firmware-schema JSON; it does not compile arbitrary TypeSpec or guarantee a
+faithful conversion of every source command. It resolves template and
+`@inherit` addressing and payload fields, expands composite fields, maps
+supported datatypes and field metadata, and emits bit maps and `@constValue`
+wire bytes.
 
-### Working
-- TypeSpec file parsing (including models with explicit fields)
-- Template handling, including multi-parameter definitions, field expansion,
-  and namespace-aware model lookup
-- Field-level `@unit`, `@factor`/`@divisor`, `@step`, `@minValue`, and
-  `@maxValue` metadata reaches profiles; min/max also become command-field
-  overrides
-- `@inherit` resolves payload fields and metadata as well as read/write
-  addressing, including inherited fillers and `@constValue`
-- Type mapping from TypeSpec types to project datatypes (partial)
-- JSON output generation
-- Decorator capture for all models (including those with bodies)
-- Command format generation (ZZ PB SB NN Dx) with correct MF from aliases
+Important boundaries:
 
-### Known Issues
+- Validation rejects unsupported/defaulted datatype mappings, unresolved
+  profiles, ID/WID values outside the firmware's 2–6-byte range, duplicate
+  address IDs, and commands exceeding the 13-field firmware limit.
+- `@in`/`@out` decorators are retained in parser metadata but are not applied
+  to emitted fields. Commands that rely on direction-specific field inclusion
+  are therefore not fully represented by the generated schema.
+- Profile mappings cover only recognized type/unit/scaling combinations.
+  `ha_profile` defaults to empty; bit-map fields are assigned
+  `binary_sensor`.
+- Command names use the upstream TypeSpec model name verbatim. The
+  slash-based hierarchy in hand-curated `config/*.json` files is not generated.
 
-1. **Profile name mapping**
-   - Currently: Using basic type names like `"uint32"`, `"int16"`
-   - Expected: Using existing profile names from `profiles/data_profiles.json` like `"data2c_celsius"`, `"uint32_hour"`
-   - Fix needed: Map TypeSpec scalar types (cntstarts, tempsensor, presssensor, etc.) to appropriate profile names
+## Defaults
 
-2. **Command name formatting** — Status: settled
-   - Now: Upstream TypeSpec model name verbatim, PascalCase
-     (e.g. `"CompStartsHwc"`, `"Setpoints_Monday"`)
-   - Previously: snake_case (`"comp_starts_hwc"`)
-   - Rationale: matches the ebusd-configuration CSV `name` column exactly, so
-     regenerated output diffs cleanly against upstream. The slash-based
-     hierarchy (`Buffer/Middle_Temperature`) is a hand-written convention in
-     `config/*.json` and is deliberately **not** reproduced by the generator —
-     see `config/README.md`.
-
-### Next Steps
-
-The critical parser bug (double increment in `_parse_model_inline`) has been fixed. All models, including those with explicit field bodies, now have their decorators properly captured.
-
-Remaining work focuses on the mapper to improve output quality:
-   1. Improve profile name mapping to use existing profile names
-   *(Command name formatting is settled — see item 2 above; the slash-based
-   hierarchy is a hand-written `config/*.json` convention, not a generator
-   target.)*
-
-Defaults:
 - `--ebusd-root`: `tools/ebus-profile-gen/ebusd-configuration`
 - `--ebus-typespec-root`: `tools/ebus-profile-gen/ebus-typespec`
 - `--key-prefix`: derived from the full lowercased tsp stem (e.g.
