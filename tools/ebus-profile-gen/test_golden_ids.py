@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,7 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mapper  # noqa: E402
 import resolver  # noqa: E402
 import tsp_parser  # noqa: E402
-from convlog import NULL_LOG  # noqa: E402
+import validate  # noqa: E402
+from convlog import ConversionLog, NULL_LOG  # noqa: E402
 from model import CommandIR, FamilyIR, FieldIR  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(
@@ -278,6 +280,104 @@ def expect_profile_metadata(
         _failures.append(f"{command_name}: {exc}")
 
 
+def expect_inheritance_resolution() -> None:
+    """Assert ambiguous @inherit resolution fails closed."""
+    global _checks
+
+    with tempfile.TemporaryDirectory() as tmp:
+        parent_a = os.path.join(tmp, "parent_a.tsp")
+        parent_b = os.path.join(tmp, "parent_b.tsp")
+        child = os.path.join(tmp, "child.tsp")
+
+        with open(parent_a, "w", encoding="utf-8") as f:
+            f.write(
+                "@base(MF, 0x09, 0x01)\n"
+                "model Shared {\n"
+                "  inherited_a: UCH;\n"
+                "}\n"
+            )
+        with open(parent_b, "w", encoding="utf-8") as f:
+            f.write(
+                "@base(MF, 0x09, 0x02)\n"
+                "model Shared {\n"
+                "  inherited_b: UCH;\n"
+                "}\n"
+            )
+        with open(child, "w", encoding="utf-8") as f:
+            f.write(
+                "@inherit(Shared)\n"
+                "model Child {\n"
+                "  own: UCH;\n"
+                "}\n"
+            )
+
+        log = ConversionLog(level="error")
+        raw = tsp_parser.TspParser([parent_a, parent_b, child], log=log).parse()
+        child_register = next(
+            reg for reg in raw["registers"] if reg["name"] == "Child"
+        )
+
+        _checks += 1
+        if not child_register.get("unsupported"):
+            _failures.append(
+                "ambiguous inheritance: Child remained eligible for emission"
+            )
+
+        _checks += 1
+        errors = [
+            rec for rec in log.records
+            if rec.get("severity") == "error"
+            and rec.get("action") == "ambiguous_inherit_parent"
+        ]
+        if len(errors) != 1:
+            _failures.append(
+                f"ambiguous inheritance: expected one error log, got {len(errors)}"
+            )
+        elif (
+            errors[0].get("parent") != "Shared"
+            or len(errors[0].get("candidates", [])) != 2
+        ):
+            _failures.append(
+                f"ambiguous inheritance: incomplete error context: {errors[0]}"
+            )
+        _checks += 1
+        issues = validate.validate_log(log.records)
+        if not any("ambiguous @inherit parent" in issue for issue in issues):
+            _failures.append(
+                f"ambiguous inheritance: validation did not fail closed: {issues}"
+            )
+
+        # Same-file context uniquely resolves a colliding parent name.
+        same_file_child = os.path.join(tmp, "same_file.tsp")
+        with open(same_file_child, "w", encoding="utf-8") as f:
+            f.write(
+                "@base(MF, 0x09, 0x03)\n"
+                "model Shared {\n"
+                "  inherited_local: UCH;\n"
+                "}\n"
+                "@inherit(Shared)\n"
+                "model LocalChild {\n"
+                "  own: UCH;\n"
+                "}\n"
+            )
+        local_log = ConversionLog(level="error")
+        local_raw = tsp_parser.TspParser(
+            [same_file_child, parent_a], log=local_log
+        ).parse()
+        local_child = next(
+            reg for reg in local_raw["registers"] if reg["name"] == "LocalChild"
+        )
+        field_names = [field["name"] for field in local_child.get("fields", [])]
+
+        _checks += 1
+        if local_child.get("unsupported"):
+            _failures.append("same-file inheritance: unique parent was rejected")
+        if "inherited_local" not in field_names:
+            _failures.append(
+                f"same-file inheritance: inherited fields missing, got {field_names}"
+            )
+
+
 def expect_distinct_profile_refs(
     commands: list[dict[str, Any]],
     first_name: str,
@@ -416,6 +516,8 @@ def expect_unit_profile_mappings() -> None:
 
 
 def main() -> int:
+    expect_inheritance_resolution()
+
     # Direction decorator inclusion and writeOnly side selection.
     direction_cases = [
         ("neutral", {}, "read", True),

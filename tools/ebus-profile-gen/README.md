@@ -102,6 +102,9 @@ combined in decorator order, followed by fields declared on the child.
 Same-name fields override in place (child metadata wins), allowing generic
 parent fields to be specialized without duplicating a wire field. Inherited
 fillers and constants therefore retain their byte positions and write bytes.
+Ambiguous parent names fail closed unless namespace and file context resolve
+to exactly one parent; no command is emitted from a partially resolved
+inheritance chain.
 
 This directory is **gitignored** — raw output never gets committed by accident.
 

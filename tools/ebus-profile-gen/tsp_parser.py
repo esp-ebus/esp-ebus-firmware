@@ -474,6 +474,7 @@ class TspParser:
         by_name: Dict[str, List[int]] = {}
         for idx, reg in enumerate(ir["registers"]):
             by_name.setdefault(reg["name"], []).append(idx)
+        parent_resolution_cache: Dict[Tuple[int, str], Optional[Dict[str, Any]]] = {}
 
         def resolve_parent(
             child: Dict[str, Any], parent_name: str
@@ -481,33 +482,60 @@ class TspParser:
             """Locate a parent register for @inherit resolution.
 
             Model names may collide across files (e.g. wi_1 in hcmode_inc,
-            iotesthp_inc and errors_inc all define one), so prefer a unique
-            global match, then the child's namespace, then the child's
-            file, and finally the first match with a warning.
+            iotesthp_inc and errors_inc all define one). Prefer a unique
+            global match, then the child's namespace, then the child's file.
+            Multiple remaining matches are ambiguous and fail the register.
             """
+            cache_key = (id(child), parent_name)
+            if cache_key in parent_resolution_cache:
+                return parent_resolution_cache[cache_key]
             matches = by_name.get(parent_name)
             if not matches:
+                parent_resolution_cache[cache_key] = None
                 return None
             if len(matches) == 1:
-                return ir["registers"][matches[0]]
+                resolved = ir["registers"][matches[0]]
+                parent_resolution_cache[cache_key] = resolved
+                return resolved
             ns = child.get("namespace", "")
             same_ns = [i for i in matches if ir["registers"][i].get("namespace") == ns]
             pool = same_ns or matches
             if len(pool) == 1:
-                return ir["registers"][pool[0]]
+                resolved = ir["registers"][pool[0]]
+                parent_resolution_cache[cache_key] = resolved
+                return resolved
             same_file = [
                 i for i in pool if ir["registers"][i].get("file") == child.get("file")
             ]
-            if same_file:
-                return ir["registers"][same_file[0]]
-            self.log.warn(
+            if len(same_file) == 1:
+                resolved = ir["registers"][same_file[0]]
+                parent_resolution_cache[cache_key] = resolved
+                return resolved
+            candidates = [
+                {
+                    "file": os.path.basename(ir["registers"][i].get("file", "")),
+                    "line": ir["registers"][i].get("line"),
+                    "namespace": ir["registers"][i].get("namespace", ""),
+                }
+                for i in pool
+            ]
+            child["unsupported"] = True
+            child["unsupported_reason"] = (
+                f"ambiguous @inherit parent {parent_name!r}"
+            )
+            self.log.error(
                 "parse",
-                "ambiguous @inherit parent; using first match",
+                f"ambiguous @inherit parent {parent_name!r}; "
+                "namespace and file context do not disambiguate it",
+                action="ambiguous_inherit_parent",
                 model=child.get("name"),
                 parent=parent_name,
                 line=child.get("line"),
+                namespace=ns,
+                candidates=candidates,
             )
-            return ir["registers"][pool[0]]
+            parent_resolution_cache[cache_key] = None
+            return None
 
         # Seed id/wid tails from each register's own @base / direction.
         # No @base and no parents: keep an empty tail so the command still
@@ -559,6 +587,12 @@ class TspParser:
                     parent = resolve_parent(reg, parent_name)
                     if parent is None:
                         continue
+                    if parent.get("unsupported"):
+                        reg["unsupported"] = True
+                        reg["unsupported_reason"] = (
+                            f"@inherit parent {parent_name!r} is unresolved"
+                        )
+                        continue
                     pmeta = parent["meta"]
                     # zz/mf/pb form the shared addressing prefix.
                     for k in ("zz", "mf", "pb"):
@@ -589,7 +623,11 @@ class TspParser:
             # Own @write with read-only parents still gets a write side.
             if reg.get("rw") == "write" and "write_tail" not in meta:
                 meta["write_tail"] = []
-            if "read_tail" not in meta and "write_tail" not in meta:
+            if (
+                "read_tail" not in meta
+                and "write_tail" not in meta
+                and not reg.get("unsupported")
+            ):
                 reg["unsupported"] = True
                 reg["unsupported_reason"] = "no read/write id resolved from @inherit"
 
@@ -654,6 +692,12 @@ class TspParser:
             for parent_name in reg.get("inherit") or []:
                 parent = resolve_parent(reg, parent_name)
                 if parent is not None:
+                    if parent.get("unsupported"):
+                        reg["unsupported"] = True
+                        reg["unsupported_reason"] = (
+                            f"@inherit parent {parent_name!r} is unresolved"
+                        )
+                        continue
                     add_fields(resolve_fields(parent))
             add_fields(own_fields[reg_id])
             resolving_fields.remove(reg_id)
