@@ -19,6 +19,7 @@ except NameError:
 BASE_JSON = os.path.join(PROJECT_ROOT, "profiles", "ha_profiles.json")
 OVERLAY_JSON = os.path.join(PROJECT_ROOT, "profiles", "ha_profiles_user.json")
 OUTPUT_FILE = os.path.join(PROJECT_ROOT, "include", "app", "ha_profile_gen.hpp")
+MAX_PROFILE_COUNT = 255
 
 
 def load_profiles(path):
@@ -42,6 +43,11 @@ def generate():
         merged[p["name"]] = p  # user wins on name collision
 
     profiles = list(merged.values())
+    if len(profiles) > MAX_PROFILE_COUNT:
+        raise ValueError(
+            f"Found {len(profiles)} HA profiles; the 1-based uint8_t "
+            f"profile index supports at most {MAX_PROFILE_COUNT}."
+        )
 
     lines = [
         "// AUTO-GENERATED FILE - DO NOT EDIT",
