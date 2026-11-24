@@ -5,6 +5,7 @@
 #include <freertos/task.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 
@@ -281,6 +282,32 @@ bool App::initServices() {
       [this](const ebus::ProtocolInfo& info) {
         monitor_.enqueueProtocolInfo(info);
       });
+
+  getEbusController().setReactiveCallback([this](
+                                              const ebus::ReactiveInfo& info) {
+    if (!config_.bus.system_response) return;
+
+    // Check for Service 07h 04h (Identification scan)
+    // Master telegram: [QQ, ZZ, 0x07, 0x04, 0x00]
+    if (info.master_view.size() >= 4 && info.master_view[2] == 0x07 &&
+        info.master_view[3] == 0x04) {
+      const auto sw = getAdapterSwVersion();
+      const uint8_t hw_raw = getAdapterHwVersionRaw();
+      const uint8_t hw_major = (hw_raw != 0xee) ? ((hw_raw >> 4) & 0x0f) : 0x00;
+      const uint8_t hw_minor = (hw_raw != 0xee) ? (hw_raw & 0x0f) : 0x00;
+
+      // 11 bytes: NN (0x0A) + 10 data bytes
+      // [NN, Manufacturer, Unit ID (5B), SW Version (2B), HW Version (2B)]
+      const std::array<uint8_t, 11> response = {
+          0x0a,                                // NN = 10 data bytes
+          0xd9,                                // danman.eu manufacturer ID
+          'E',      'S',       'P', 'D', 'A',  // Unit ID (ASCII)
+          sw.first, sw.second,                 // SW version
+          hw_major, hw_minor                   // HW version
+      };
+      info.slave_response.assign(response);
+    }
+  });
 
 #if EBUS_BUS_TAP
   // Bus byte tap for captures: every bus event as POD into the monitor
