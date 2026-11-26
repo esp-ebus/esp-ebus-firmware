@@ -84,20 +84,22 @@ jobs:
       with:
         path: release
 
-  release-master:
+  release-rolling:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - name: Download artifacts
       uses: actions/download-artifact@v4.1.7
       with:
         path: release
-    - name: Delete existing master release
+    - name: Delete existing rolling release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: gh release delete master --repo "$GITHUB_REPOSITORY" --cleanup-tag -y || true
-    - name: Create or update master release
+      run: gh release delete rolling-release --repo "$GITHUB_REPOSITORY" --cleanup-tag -y || true
+    - name: Create rolling release
       uses: ncipollo/release-action@v1
       with:
         body: |
@@ -107,8 +109,8 @@ jobs:
         commit: ${{ github.sha }}
         removeArtifacts: true
         prerelease: true
-        tag: master
-        name: master
+        tag: rolling-release
+        name: rolling-release
         artifacts: "release/artifact/*"
 
   release:
