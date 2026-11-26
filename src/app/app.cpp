@@ -66,7 +66,7 @@ void App::initPlatform() {
 
   calcUniqueId();
   loadAdapterHwVersionFromEfuse();
-  if (getAdapterHwVersionRaw() ==
+  if (getAdapterHwVersionRaw() >=
       static_cast<uint8_t>(AdapterHwVersionEfuse::v7_0)) {
     WifiNetworkManager::setStatusLedPin(5);
   } else {
