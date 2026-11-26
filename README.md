@@ -38,6 +38,10 @@ Details: wiki [5. Bridge mode](https://github.com/danielkucera/esp-ebus/wiki/5.-
 
 ## Build and Flash
 
+Prebuilt firmware is available on the [releases page](https://github.com/esp-ebus/esp-ebus-firmware/releases).
+The [rolling prerelease](https://github.com/esp-ebus/esp-ebus-firmware/releases/tag/rolling-release)
+contains the latest successful build from `master`.
+
 The project uses PlatformIO with the ESP-IDF framework. Install PlatformIO,
 clone this repository, and run commands from the repository root.
 
