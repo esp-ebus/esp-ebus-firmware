@@ -491,11 +491,13 @@ void WifiNetworkManager::configureStaticIpIfEnabled() {
   const std::string dns2_value = getConfiguredDns2();
 
   const bool valid =
-      esp_netif_str_to_ip4(getConfiguredIpAddress().c_str(), &ip_address_) &&
-      esp_netif_str_to_ip4(getConfiguredNetmask().c_str(), &netmask_);
+      esp_netif_str_to_ip4(getConfiguredIpAddress().c_str(), &ip_address_) ==
+          ESP_OK &&
+      esp_netif_str_to_ip4(getConfiguredNetmask().c_str(), &netmask_) ==
+          ESP_OK;
   if (valid) {
     if (!gateway_value.empty() &&
-        !esp_netif_str_to_ip4(gateway_value.c_str(), &gateway_)) {
+        esp_netif_str_to_ip4(gateway_value.c_str(), &gateway_) != ESP_OK) {
       logger.warn("Invalid gateway configured, using 0.0.0.0");
       // Set to 0.0.0.0 explicitly
       gateway_.addr = ESP_IP4TOADDR(0, 0, 0, 0);
@@ -516,7 +518,8 @@ void WifiNetworkManager::configureStaticIpIfEnabled() {
     }
     bool dns1_is_valid = true;
     if (!dns1_value.empty())
-      dns1_is_valid = esp_netif_str_to_ip4(dns1_value.c_str(), &dns1_);
+      dns1_is_valid =
+          esp_netif_str_to_ip4(dns1_value.c_str(), &dns1_) == ESP_OK;
     if (!dns1_is_valid)
       logger.warn("Invalid DNS1 configured, ignoring");
     else {
@@ -528,7 +531,8 @@ void WifiNetworkManager::configureStaticIpIfEnabled() {
 
     bool dns2_is_valid = true;
     if (!dns2_value.empty())
-      dns2_is_valid = esp_netif_str_to_ip4(dns2_value.c_str(), &dns2_);
+      dns2_is_valid =
+          esp_netif_str_to_ip4(dns2_value.c_str(), &dns2_) == ESP_OK;
     if (!dns2_is_valid)
       logger.warn("Invalid DNS2 configured, ignoring");
     else {
