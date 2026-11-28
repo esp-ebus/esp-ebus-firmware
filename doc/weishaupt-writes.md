@@ -1,7 +1,7 @@
 # Optional Weishaupt 5023 writes
 
 INTERNAL firmware supports the captured WCM-FS parameter-write format when a
-command explicitly sets `"write_type": "weishaupt"`. Omit this property, or set
+command explicitly sets `"write_encoding": "weishaupt"`. Omit this property, or set
 it to `"simple"`, to preserve the existing write behavior: append the encoded
 value to `write_cmd` without modifying either byte sequence.
 
@@ -13,7 +13,7 @@ value to `write_cmd` without modifying either byte sequence.
   "name": "Weishaupt/Circuit_2_Downstairs/Normal_room_setpoint",
   "read_cmd": "75502203700500",
   "write_cmd": "70502309000500",
-  "write_type": "weishaupt",
+  "write_encoding": "weishaupt",
   "interval": 60,
   "master": false,
   "fields": [
@@ -33,8 +33,10 @@ The ordinary eBUS frame checksum remains the library's responsibility.
 Malformed opted-in prefixes or values are rejected before sending. Existing
 commands, including 5023 commands without the opt-in, keep their original bytes.
 The option survives JSON export and saving/reloading the command set. In the
-compact storage format it is an optional eighth column, after `fields`; older
-seven-column records use `"simple"`. 
+tabular storage format it is the optional trailing column after `fields`: the
+ninth column of a compact record (tenth when the optional `nn` column is
+present), or the eighth of a legacy `read_cmd`/`write_cmd` record. Records
+without it use `"simple"`.
 
 HTTP, MQTT and cron use the same write builder. For HTTP:
 

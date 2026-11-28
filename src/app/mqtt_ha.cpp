@@ -8,6 +8,7 @@
 #include <string>
 
 #include "app/command_manager.hpp"
+#include "app/mqtt_topic.hpp"
 
 // clang-format off
 namespace {
@@ -18,7 +19,7 @@ inline constexpr size_t max_device_id_length = mqtt_ha_limits::max_device_id_len
 namespace mqtt_ha_buffer_limits {
 // Topic and ID limits
 inline constexpr size_t max_topic_length = 96;         // MQTT discovery topic (e.g., homeassistant/number/ebusXXXX/32_name/config)
-inline constexpr size_t max_state_topic_length = 96;   // State topic (e.g., ebusXXXX/values/commandname)
+inline constexpr size_t max_state_topic_length = 128;  // State topic (e.g., ebusXXXX/values/<key>_<name>)
 inline constexpr size_t max_object_id_length = 64;     // Sanitized object ID (e.g., 32_basement_temperature_nightroomsetpoint_value)
 inline constexpr size_t max_raw_object_id_length = 64; // Raw object ID before sanitization
 inline constexpr size_t max_uid_length = 48;           // Unique ID (e.g., ebusXXXX_32_0)
@@ -63,6 +64,7 @@ void formatPrettyName(std::string_view sv, char* out, size_t max_len) {
   }
   out[out_idx] = '\0';
 }
+
 }  // namespace
 
 void MqttHA::setUniqueId(const std::string& id) {
@@ -256,193 +258,262 @@ void MqttHA::publishComponent(const Command* command, size_t field_idx,
   if (!profile) return;
 
   std::string_view component = profile->component;
+  // HA number/switch/select use the read/write discovery schema where
+  // command_topic is required - but a scalar HA command can only carry
+  // one field, never the full multi-field object payload. Multi-field
+  // commands therefore publish read-only sensors; any retained config
+  // left by the writable component this replaces is cleared alongside.
+  const bool converted =
+      command->getFieldCount() > 1 &&
+      (component == "switch" || component == "number" || component == "select");
+  if (converted) component = "sensor";
 
   const std::string& dev_id = device_identifiers_;
 
-  std::string_view field_name_sv = command->getFieldName(field_idx);
-  const bool plain = payload_mode_ == MqttPayloadMode::plain;
-  const bool per_field = command->getFieldCount() > 1 &&
-                         payload_mode_ != MqttPayloadMode::json_multivalue;
-  // Name of the key inside the state JSON object (multivalue keeps field
-  // names; single-field commands and per-field topics use "value").
-  std::string_view state_field_name_sv =
-      (command->getFieldCount() > 1 && !per_field && !field_name_sv.empty())
-          ? field_name_sv
-          : "value";
-  char value_expr_buf[mqtt_ha_buffer_limits::max_value_template_length];
-  if (plain) {
-    snprintf(value_expr_buf, sizeof(value_expr_buf), "value");
-  } else {
-    snprintf(value_expr_buf, sizeof(value_expr_buf), "value_json.%.*s",
-             (int)state_field_name_sv.size(), state_field_name_sv.data());
-  }
-  const std::string_view value_expr = value_expr_buf;
-  std::string_view key_sv = command->getKey();
+  const bool has_bits = command->hasFieldBits(field_idx);
+  const size_t expand_n = has_bits ? command->getFieldBitCount(field_idx) : 1;
+  for (size_t bit = 0; bit < expand_n; ++bit) {
+    // Bits fields publish one entity per bit; the bit name stands in for
+    // the field name in object_id / templates / topics.
+    std::string_view field_name_sv =
+        has_bits ? command->getFieldBitName(field_idx, bit)
+                 : command->getFieldName(field_idx);
+    if (has_bits && field_name_sv.empty()) continue;
 
-  char raw_object_id_buf[mqtt_ha_buffer_limits::max_raw_object_id_length];
-  if (!command->getName().empty()) {
-    snprintf(raw_object_id_buf, sizeof(raw_object_id_buf), "%.*s_%.*s_%.*s",
-             (int)key_sv.size(), key_sv.data(), (int)command->getName().size(),
-             command->getName().data(), (int)field_name_sv.size(),
-             field_name_sv.data());
-  } else {
-    snprintf(raw_object_id_buf, sizeof(raw_object_id_buf), "%.*s_%.*s",
-             (int)key_sv.size(), key_sv.data(), (int)field_name_sv.size(),
-             field_name_sv.data());
-  }
-  char object_id_buf[mqtt_ha_buffer_limits::max_object_id_length];
-  sanitizeObjectId(raw_object_id_buf, object_id_buf, sizeof(object_id_buf));
+    const bool plain = payload_mode_ == MqttPayloadMode::plain;
+    // Per-field topics apply when the payload is split by field (or bit):
+    // multi-field commands, or any bits expansion outside json_multivalue.
+    const bool per_field = (command->getFieldCount() > 1 || has_bits) &&
+                           payload_mode_ != MqttPayloadMode::json_multivalue;
+    // Name of the key inside the state JSON object: multivalue keeps field
+    // / bit names (empty → "value"); per-field topics and single-field
+    // non-bits publish {"value": ...}.
+    const bool multivalue_keys =
+        payload_mode_ == MqttPayloadMode::json_multivalue;
+    std::string_view state_field_name_sv =
+        (multivalue_keys && !field_name_sv.empty() &&
+         (command->getFieldCount() > 1 || has_bits))
+            ? field_name_sv
+            : "value";
+    char value_expr_buf[mqtt_ha_buffer_limits::max_value_template_length];
+    if (plain) {
+      snprintf(value_expr_buf, sizeof(value_expr_buf), "value");
+    } else {
+      snprintf(value_expr_buf, sizeof(value_expr_buf), "value_json.%.*s",
+               (int)state_field_name_sv.size(), state_field_name_sv.data());
+    }
+    const std::string_view value_expr = value_expr_buf;
+    std::string_view key_sv = command->getKey();
 
-  char topic_buf[mqtt_ha_buffer_limits::max_topic_length];
-  int tlen =
-      snprintf(topic_buf, sizeof(topic_buf), "homeassistant/%s/%s/%s/config",
-               component.data(), dev_id.c_str(), object_id_buf);
-  if (tlen <= 0 || (size_t)tlen >= sizeof(topic_buf)) return;
+    char raw_object_id_buf[mqtt_ha_buffer_limits::max_raw_object_id_length];
+    if (!command->getName().empty()) {
+      snprintf(raw_object_id_buf, sizeof(raw_object_id_buf), "%.*s_%.*s_%.*s",
+               (int)key_sv.size(), key_sv.data(),
+               (int)command->getName().size(), command->getName().data(),
+               (int)field_name_sv.size(), field_name_sv.data());
+    } else {
+      snprintf(raw_object_id_buf, sizeof(raw_object_id_buf), "%.*s_%.*s",
+               (int)key_sv.size(), key_sv.data(), (int)field_name_sv.size(),
+               field_name_sv.data());
+    }
+    char object_id_buf[mqtt_ha_buffer_limits::max_object_id_length];
+    sanitizeObjectId(raw_object_id_buf, object_id_buf, sizeof(object_id_buf));
 
-  if (remove || !enabled_) {
-    if (transport_.publish) transport_.publish(topic_buf, 0, true, "", false);
-    return;
-  }
+    char topic_buf[mqtt_ha_buffer_limits::max_topic_length];
+    int tlen =
+        snprintf(topic_buf, sizeof(topic_buf), "homeassistant/%s/%s/%s/config",
+                 component.data(), dev_id.c_str(), object_id_buf);
+    if (tlen <= 0 || (size_t)tlen >= sizeof(topic_buf)) continue;
 
-  char state_topic_buf[mqtt_ha_buffer_limits::max_state_topic_length];
-  if (per_field) {
-    const std::string_view field_topic_name =
-        field_name_sv.empty() ? "value" : field_name_sv;
-    createStateTopic(state_topic_buf, sizeof(state_topic_buf), "values",
-                     field_topic_name);
-  } else {
-    createStateTopic(state_topic_buf, sizeof(state_topic_buf), "values",
-                     command->getName());
-  }
+    if (remove || !enabled_) {
+      if (transport_.publish) transport_.publish(topic_buf, 0, true, "", false);
+      if (converted) {
+        char old_topic_buf[mqtt_ha_buffer_limits::max_topic_length];
+        int olen = snprintf(old_topic_buf, sizeof(old_topic_buf),
+                            "homeassistant/%s/%s/%s/config", profile->component,
+                            dev_id.c_str(), object_id_buf);
+        if (olen > 0 && (size_t)olen < sizeof(old_topic_buf) &&
+            transport_.publish) {
+          transport_.publish(old_topic_buf, 0, true, "", false);
+        }
+      }
+      continue;
+    }
 
-  char value_template_buf[mqtt_ha_buffer_limits::max_value_template_length];
+    if (converted) {
+      // Drop the retained discovery config of the writable component
+      // this read-only sensor replaced (same object_id, other type).
+      char old_topic_buf[mqtt_ha_buffer_limits::max_topic_length];
+      int olen = snprintf(old_topic_buf, sizeof(old_topic_buf),
+                          "homeassistant/%s/%s/%s/config", profile->component,
+                          dev_id.c_str(), object_id_buf);
+      if (olen > 0 && (size_t)olen < sizeof(old_topic_buf) &&
+          transport_.publish) {
+        transport_.publish(old_topic_buf, 0, true, "", false);
+      }
+    }
 
-  if (!transport_.publish_stream) return;
-  transport_.publish_stream(
-      topic_buf, 0, true,
-      [&](const ebus::JsonChunkVisitor& v) {
-        ebus::detail::JsonWriter writer(v);
-        auto root = writer.objectScope();
+    char state_topic_buf[mqtt_ha_buffer_limits::max_state_topic_length];
+    // State topic mirrors Mqtt::handleValueUpdate: values/<key>_<name> so
+    // the topic is unique per (slave, file, id) — the same model name
+    // (e.g. FlowTemp) resolves to different registers in different units.
+    if (per_field) {
+      const std::string_view field_topic_name =
+          field_name_sv.empty() ? "value" : field_name_sv;
+      createStateTopic(state_topic_buf, sizeof(state_topic_buf), "values",
+                       key_sv, field_topic_name);
+    } else {
+      createStateTopic(state_topic_buf, sizeof(state_topic_buf), "values",
+                       key_sv, command->getName());
+    }
 
-        char pretty_cmd_buf[mqtt_ha_buffer_limits::max_pretty_name_length];
-        formatPrettyName(command->getName(), pretty_cmd_buf,
-                         sizeof(pretty_cmd_buf));
+    char value_template_buf[mqtt_ha_buffer_limits::max_value_template_length];
 
-        char entity_name_buf[mqtt_ha_buffer_limits::max_entity_name_length];
-        if (command->getFieldCount() > 1 && field_name_sv != "value") {
-          char pretty_field_buf[mqtt_ha_buffer_limits::max_pretty_name_length];
-          formatPrettyName(field_name_sv, pretty_field_buf,
-                           sizeof(pretty_field_buf));
-          if (pretty_cmd_buf[0] != '\0') {
-            snprintf(entity_name_buf, sizeof(entity_name_buf), "%s %s",
-                     pretty_cmd_buf, pretty_field_buf);
-          } else {
-            snprintf(entity_name_buf, sizeof(entity_name_buf), "%s",
-                     pretty_field_buf);
-          }
-        } else {
-          if (pretty_cmd_buf[0] != '\0') {
-            snprintf(entity_name_buf, sizeof(entity_name_buf), "%s",
-                     pretty_cmd_buf);
-          } else {
+    if (!transport_.publish_stream) return;
+    transport_.publish_stream(
+        topic_buf, 0, true,
+        [&](const ebus::JsonChunkVisitor& v) {
+          ebus::detail::JsonWriter writer(v);
+          auto root = writer.objectScope();
+
+          char pretty_cmd_buf[mqtt_ha_buffer_limits::max_pretty_name_length];
+          formatPrettyName(command->getName(), pretty_cmd_buf,
+                           sizeof(pretty_cmd_buf));
+
+          char entity_name_buf[mqtt_ha_buffer_limits::max_entity_name_length];
+          if ((command->getFieldCount() > 1 || has_bits) &&
+              field_name_sv != "value") {
             char
                 pretty_field_buf[mqtt_ha_buffer_limits::max_pretty_name_length];
             formatPrettyName(field_name_sv, pretty_field_buf,
                              sizeof(pretty_field_buf));
-            snprintf(entity_name_buf, sizeof(entity_name_buf), "%s",
-                     pretty_field_buf);
-          }
-        }
-
-        // Unique ID includes field_idx to distinguish multiple fields
-        char uid_buf[mqtt_ha_buffer_limits::max_uid_length];
-        snprintf(uid_buf, sizeof(uid_buf), "%s_%.*s_%zu", dev_id.c_str(),
-                 (int)key_sv.size(), key_sv.data(), field_idx);
-        writer.writeField("unique_id", uid_buf);
-        writer.writeField("name", entity_name_buf);
-        writer.writeField("availability_topic", will_topic_);
-        writer.writeField("availability_template", "{{value_json.value}}");
-
-        {
-          auto device = writer.objectScope("device");
-          writer.writeField("identifiers", device_identifiers_);
-        }
-
-        writer.writeField("state_topic", state_topic_buf);
-
-        if (profile && profile->device_class && profile->device_class[0])
-          writer.writeField("device_class", profile->device_class);
-        if (profile && profile->entity_category && profile->entity_category[0])
-          writer.writeField("entity_category", profile->entity_category);
-
-        if (component == "binary_sensor" || component == "switch") {
-          char payload_on_buf[mqtt_ha_buffer_limits::max_payload_buf_length],
-              payload_off_buf[mqtt_ha_buffer_limits::max_payload_buf_length];
-          snprintf(payload_on_buf, sizeof(payload_on_buf), "%d",
-                   profile ? profile->payload_on : 1);
-          snprintf(payload_off_buf, sizeof(payload_off_buf), "%d",
-                   profile ? profile->payload_off : 0);
-          writer.writeField("payload_on", payload_on_buf);
-          writer.writeField("payload_off", payload_off_buf);
-          snprintf(value_template_buf, sizeof(value_template_buf), "{{%.*s}}",
-                   (int)value_expr.size(), value_expr.data());
-          writer.writeField("value_template", value_template_buf);
-        }
-
-        if (component == "switch" || component == "number" ||
-            component == "select") {
-          char cmd_topic_buf[mqtt_ha_buffer_limits::max_cmd_topic_length];
-          snprintf(cmd_topic_buf, sizeof(cmd_topic_buf), "%sset/%.*s",
-                   root_topic_.c_str(), (int)key_sv.size(), key_sv.data());
-          writer.writeField("command_topic", cmd_topic_buf);
-        }
-
-        if (component == "sensor") {
-          if (profile && profile->state_class && profile->state_class[0])
-            writer.writeField("state_class", profile->state_class);
-          // Use field-specific unit
-          writer.writeField("unit_of_measurement",
-                            getFieldUnit(command, field_idx));
-        }
-
-        if (component == "number") {
-          writer.writeField("unit_of_measurement",
-                            getFieldUnit(command, field_idx));
-          snprintf(value_template_buf, sizeof(value_template_buf), "{{%.*s}}",
-                   (int)value_expr.size(), value_expr.data());
-          writer.writeField("value_template", value_template_buf);
-          writer.writeField("command_template", "{{value}}");
-          writer.writeFieldFloat("min", getFieldMin(command, field_idx));
-          writer.writeFieldFloat("max", getFieldMax(command, field_idx));
-          writer.writeFieldFloat("step", profile ? profile->step : 1);
-          writer.writeField("mode", profile && profile->mode && profile->mode[0]
-                                        ? profile->mode
-                                        : "auto");
-        }
-
-        if (component == "switch") {
-          writer.writeField("command_template", "{{value}}");
-        }
-
-        if (profile && profile->key_value_count > 0) {
-          // Plain payloads are text; map through int for the numeric keys.
-          auto opt = createOptions(
-              profile, plain ? std::string_view("(value | int)") : value_expr);
-          if (component == "select") {
-            {
-              auto options = writer.arrayScope("options");
-              for (const auto& s : opt.options) writer.writeValue(s);
+            if (pretty_cmd_buf[0] != '\0') {
+              snprintf(entity_name_buf, sizeof(entity_name_buf), "%s %s",
+                       pretty_cmd_buf, pretty_field_buf);
+            } else {
+              snprintf(entity_name_buf, sizeof(entity_name_buf), "%s",
+                       pretty_field_buf);
             }
-            writer.writeField("command_template", opt.cmd_map);
+          } else {
+            if (pretty_cmd_buf[0] != '\0') {
+              snprintf(entity_name_buf, sizeof(entity_name_buf), "%s",
+                       pretty_cmd_buf);
+            } else {
+              char pretty_field_buf
+                  [mqtt_ha_buffer_limits::max_pretty_name_length];
+              formatPrettyName(field_name_sv, pretty_field_buf,
+                               sizeof(pretty_field_buf));
+              snprintf(entity_name_buf, sizeof(entity_name_buf), "%s",
+                       pretty_field_buf);
+            }
           }
-          writer.writeField("value_template", opt.value_map);
-        } else if (component == "sensor") {
-          snprintf(value_template_buf, sizeof(value_template_buf), "{{%.*s}}",
-                   (int)value_expr.size(), value_expr.data());
-          writer.writeField("value_template", value_template_buf);
-        }
-      },
-      false);
+
+          // Unique ID includes field_idx (and bit index for bits fields) to
+          // distinguish entities.
+          char uid_buf[mqtt_ha_buffer_limits::max_uid_length];
+          if (has_bits) {
+            snprintf(uid_buf, sizeof(uid_buf), "%s_%.*s_%zu_%zu",
+                     dev_id.c_str(), (int)key_sv.size(), key_sv.data(),
+                     field_idx, bit);
+          } else {
+            snprintf(uid_buf, sizeof(uid_buf), "%s_%.*s_%zu", dev_id.c_str(),
+                     (int)key_sv.size(), key_sv.data(), field_idx);
+          }
+          writer.writeField("unique_id", uid_buf);
+          writer.writeField("name", entity_name_buf);
+          writer.writeField("availability_topic", will_topic_);
+          writer.writeField("availability_template", "{{value_json.value}}");
+
+          {
+            auto device = writer.objectScope("device");
+            writer.writeField("identifiers", device_identifiers_);
+          }
+
+          writer.writeField("state_topic", state_topic_buf);
+
+          if (profile && profile->device_class && profile->device_class[0])
+            writer.writeField("device_class", profile->device_class);
+          if (profile && profile->entity_category &&
+              profile->entity_category[0])
+            writer.writeField("entity_category", profile->entity_category);
+
+          if (component == "binary_sensor" || component == "switch") {
+            char payload_on_buf[mqtt_ha_buffer_limits::max_payload_buf_length],
+                payload_off_buf[mqtt_ha_buffer_limits::max_payload_buf_length];
+            snprintf(payload_on_buf, sizeof(payload_on_buf), "%d",
+                     profile ? profile->payload_on : 1);
+            snprintf(payload_off_buf, sizeof(payload_off_buf), "%d",
+                     profile ? profile->payload_off : 0);
+            writer.writeField("payload_on", payload_on_buf);
+            writer.writeField("payload_off", payload_off_buf);
+            snprintf(value_template_buf, sizeof(value_template_buf), "{{%.*s}}",
+                     (int)value_expr.size(), value_expr.data());
+            writer.writeField("value_template", value_template_buf);
+          }
+
+          if (component == "switch" || component == "number" ||
+              component == "select") {
+            char cmd_topic_buf[mqtt_ha_buffer_limits::max_cmd_topic_length];
+            snprintf(cmd_topic_buf, sizeof(cmd_topic_buf), "%sset/%.*s",
+                     root_topic_.c_str(), (int)key_sv.size(), key_sv.data());
+            writer.writeField("command_topic", cmd_topic_buf);
+          }
+
+          if (component == "sensor") {
+            if (profile && profile->state_class && profile->state_class[0])
+              writer.writeField("state_class", profile->state_class);
+            // Use field-specific unit
+            writer.writeField("unit_of_measurement",
+                              getFieldUnit(command, field_idx));
+          }
+
+          if (component == "number") {
+            writer.writeField("unit_of_measurement",
+                              getFieldUnit(command, field_idx));
+            snprintf(value_template_buf, sizeof(value_template_buf), "{{%.*s}}",
+                     (int)value_expr.size(), value_expr.data());
+            writer.writeField("value_template", value_template_buf);
+            writer.writeField("command_template", "{{value}}");
+            // Profiles with unpopped TypeSpec metadata carry max = 0 -
+            // omit min/max so HA applies its own sane defaults instead
+            // of clamping the slider to a zero-width range.
+            const float max_limit = getFieldMax(command, field_idx);
+            if (max_limit > 0.0f) {
+              writer.writeFieldFloat("min", getFieldMin(command, field_idx));
+              writer.writeFieldFloat("max", max_limit);
+            }
+            writer.writeFieldFloat("step", profile ? profile->step : 1);
+            writer.writeField("mode",
+                              profile && profile->mode && profile->mode[0]
+                                  ? profile->mode
+                                  : "auto");
+          }
+
+          if (component == "switch") {
+            writer.writeField("command_template", "{{value}}");
+          }
+
+          if (profile && profile->key_value_count > 0) {
+            // Plain payloads are text; map through int for the numeric keys.
+            auto opt =
+                createOptions(profile, plain ? std::string_view("(value | int)")
+                                             : value_expr);
+            if (component == "select") {
+              {
+                auto options = writer.arrayScope("options");
+                for (const auto& s : opt.options) writer.writeValue(s);
+              }
+              writer.writeField("command_template", opt.cmd_map);
+            }
+            writer.writeField("value_template", opt.value_map);
+          } else if (component == "sensor") {
+            snprintf(value_template_buf, sizeof(value_template_buf), "{{%.*s}}",
+                     (int)value_expr.size(), value_expr.data());
+            writer.writeField("value_template", value_template_buf);
+          }
+        },
+        false);
+  }
 }
 
 void MqttHA::publishComponentIfEnabled(const Command* command,
@@ -512,23 +583,36 @@ void MqttHA::sanitizeObjectId(std::string_view source, char* out,
 }
 
 void MqttHA::createStateTopic(char* out, size_t out_size,
-                              std::string_view prefix,
-                              std::string_view topic) const {
+                              std::string_view prefix, std::string_view seg1,
+                              std::string_view seg2) const {
   char lower_buf[mqtt_ha_buffer_limits::max_lower_buf_length];
-  size_t tlen = std::min(topic.size(), sizeof(lower_buf) - 1);
-  for (size_t i = 0; i < tlen; i++) {
-    lower_buf[i] = std::tolower(static_cast<unsigned char>(topic[i]));
+  // Copy seg1 as-is (keys are already lowercase); toSnakeCase handles any
+  // PascalCase if present — but for pure-lowercase input it's a no-op.
+  size_t tlen1 = std::min(seg1.size(), sizeof(lower_buf) - 1);
+  for (size_t i = 0; i < tlen1; i++) {
+    lower_buf[i] = static_cast<char>(seg1[i]);
   }
-  lower_buf[tlen] = '\0';
-
+  tlen1 = toSnakeCase(lower_buf, tlen1);
+  // Copy seg2 (may be PascalCase, e.g. CompStartsHwc); toSnakeCase inserts
+  // underscores and lowercases in one pass, so we must NOT pre-lowercase.
+  size_t tlen2 = std::min(seg2.size(), sizeof(lower_buf) - 1 - tlen1 - 1);
+  for (size_t i = 0; i < tlen2; i++) {
+    lower_buf[tlen1 + i] = static_cast<char>(seg2[i]);
+  }
+  tlen2 = toSnakeCase(lower_buf + tlen1, tlen2);
+  lower_buf[tlen1 + tlen2] = '\0';
   int slen =
       snprintf(out, out_size, "%s%s", root_topic_.c_str(), prefix.data());
   if (slen < 0) return;
   if (!prefix.empty()) {
     if ((size_t)slen < out_size - 1) out[slen++] = '/';
   }
-  for (size_t i = 0; i < tlen && (size_t)slen < out_size - 1; i++) {
+  for (size_t i = 0; i < tlen1 && (size_t)slen < out_size - 1; i++) {
     out[slen++] = lower_buf[i];
+  }
+  if (!seg2.empty() && (size_t)slen < out_size - 1) out[slen++] = '_';
+  for (size_t i = 0; i < tlen2 && (size_t)slen < out_size - 1; i++) {
+    out[slen++] = lower_buf[tlen1 + i];
   }
   out[slen] = '\0';
 }

@@ -10,8 +10,10 @@
 
 #include "app/app_limits.hpp"
 #include "app/command_manager.hpp"
+#include "app/command_read.hpp"
 #include "app/ebus_accessor.hpp"
 #include "app/mqtt_ha.hpp"
+#include "app/mqtt_topic.hpp"
 #include "ebus/detail/json_reader.hpp"
 #include "ebus/detail/json_writer.hpp"
 #include "ebus/status.hpp"
@@ -666,8 +668,13 @@ void Mqtt::handleRead(std::string_view payload) {
 
   Command* command = command_manager.findCommand(key_view);
   if (command != nullptr) {
-    command->setLast(0);  // Trigger immediate physical poll
-    handleValueUpdate(key_view);
+    if (!command->getActive()) {
+      publishResponse("read", "Passive command: waiting for bus traffic");
+    } else if (!requestCommandRead(*command)) {
+      publishResponse("read", "Unable to queue bus read");
+    } else {
+      handleValueUpdate(key_view);
+    }
   } else {  // Use snprintf for error response
     char err_buf[128];
     snprintf(err_buf, sizeof(err_buf), "key '%.*s' not found",
@@ -682,6 +689,7 @@ void Mqtt::handleWrite(std::string_view payload) {
 
   std::string_view key_view;
   std::string_view val_view;
+  bool has_value = false;
 
   reader.forEachField([&](std::string_view k, ebus::detail::JsonReader& r) {
     if (k == "key") {
@@ -689,6 +697,7 @@ void Mqtt::handleWrite(std::string_view payload) {
         key_view = r.value();
       }
     } else if (k == "value") {
+      has_value = true;
       val_view = r.rawValue();
     }
     return true;
@@ -698,7 +707,8 @@ void Mqtt::handleWrite(std::string_view payload) {
 
   Command* command = command_manager.findCommand(key_view);
   if (command != nullptr) {
-    if (val_view.empty()) {
+    const bool fieldless_write = !has_value && command->canWriteWithoutValue();
+    if (!has_value && !fieldless_write) {
       publishStream("response", 0, false,
                     [key_view](const ebus::JsonChunkVisitor& v) {
                       ebus::detail::JsonWriter writer(v);
@@ -714,27 +724,9 @@ void Mqtt::handleWrite(std::string_view payload) {
     }
 
     ebus::Sequence value_bytes;
-    auto field_dt = command->getFieldDatatype(0);
-    if (ebus::isNumeric(field_dt)) {
-      // Strict parse (see command.cpp): garbage must not become 0.
-      auto parsed = ebus::toNumStrict<double>(val_view);
-      if (parsed) {
-        double val = *parsed;
-        if ((val >= command->getFieldMin(0)) &&
-            (val <= command->getFieldMax(0))) {
-          value_bytes = command->getVectorFromDouble(val, 0);
-        }
-      }
-    } else {
-      if (val_view.size() >= 2 && val_view.front() == '"' &&
-          val_view.back() == '"') {
-        val_view.remove_prefix(1);
-        val_view.remove_suffix(1);
-      }
-      value_bytes = command->getVectorFromString(val_view, 0);
-    }
+    if (has_value) value_bytes = command->getVectorFromValue(val_view);
 
-    if (!value_bytes.empty()) {
+    if (fieldless_write || !value_bytes.empty()) {
       ebus::Sequence full_write =
           command->buildWriteSequence(command_manager, value_bytes);
 
@@ -742,7 +734,10 @@ void Mqtt::handleWrite(std::string_view payload) {
         publishResponse("write", "Invalid write command format");
         return;
       }
-      getEbusController().enqueue(app::priority::send, full_write);
+      if (!command_manager.queueWrite(command->getKey(), full_write)) {
+        publishResponse("write", "Unable to queue write command");
+        return;
+      }
       publishStream("response", 0, false,
                     [command, key_view](const ebus::JsonChunkVisitor& v) {
                       ebus::detail::JsonWriter writer(v);
@@ -756,7 +751,6 @@ void Mqtt::handleWrite(std::string_view payload) {
                                command->getName().data());
                       writer.writeField("status", status_buf);
                     });
-      command->setLast(0);
     } else {
       // Use snprintf for error response
       publishStream("response", 0, false,
@@ -789,36 +783,27 @@ void Mqtt::handleDirectWrite(std::string_view key, std::string_view val_view) {
   Command* command = command_manager.findCommand(key);
   if (command == nullptr) return;
 
+  // Scalar for single-field commands, {"field":value,...} object for
+  // multi-field ones - getVectorFromValue routes and rejects incomplete
+  // payloads before anything reaches the bus.
+  const bool fieldless_write =
+      val_view.empty() && command->canWriteWithoutValue();
   ebus::Sequence value_bytes;
-  auto field_dt = command->getFieldDatatype(0);
-  if (ebus::isNumeric(field_dt)) {
-    // Strict parse (see command.cpp): garbage must not become 0.
-    auto parsed = ebus::toNumStrict<double>(val_view);
-    if (parsed) {
-      double val = *parsed;
-      if ((val >= command->getFieldMin(0)) &&
-          (val <= command->getFieldMax(0))) {
-        value_bytes = command->getVectorFromDouble(val, 0);
-      }
-    }
-  } else {
-    if (val_view.size() >= 2 && val_view.front() == '"' &&
-        val_view.back() == '"') {
-      val_view.remove_prefix(1);
-      val_view.remove_suffix(1);
-    }
-    value_bytes = command->getVectorFromString(val_view, 0);
+  if (!fieldless_write) {
+    value_bytes = command->getVectorFromValue(val_view);
   }
 
-  if (!value_bytes.empty()) {
+  if (fieldless_write || !value_bytes.empty()) {
     ebus::Sequence full_write =
         command->buildWriteSequence(command_manager, value_bytes);
     if (full_write.empty()) {
       logger.warn("Invalid write command format");
       return;
     }
-    getEbusController().enqueue(app::priority::send, full_write);
-    command->setLast(0);
+    if (!command_manager.queueWrite(command->getKey(), full_write)) {
+      logger.warn("[MQTT] Unable to queue write command");
+      return;
+    }
     char buf[128];
     snprintf(buf, sizeof(buf), "[MQTT] Scheduled write for '%.*s'",
              (int)key.size(), key.data());
@@ -848,18 +833,25 @@ void Mqtt::handleValueUpdate(std::string_view key) {
 
   if (!connected_) return;
 
-  auto lowerTopic = [](char* topic, int len) {
-    for (int i = 7; i < len; ++i)
-      topic[i] = (char)tolower((unsigned char)topic[i]);
-  };
-
   const size_t field_count = cmd->getFieldCount();
-  if (field_count <= 1 || payload_mode_ == MqttPayloadMode::json_multivalue) {
+  // A bits field must not be swallowed by the single-topic shortcut: it
+  // expands to one topic per bit (json_single / plain) instead.
+  const bool field0_bits = field_count > 0 && cmd->hasFieldBits(0);
+  if ((field_count <= 1 && !field0_bits) ||
+      payload_mode_ == MqttPayloadMode::json_multivalue) {
     char topic_buf[128];
-    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s",
-                     (int)cmd->getName().size(), cmd->getName().data());
+    // Topic is keyed off the command key, not the name: the same model
+    // name (e.g. FlowTemp) resolves to different physical registers in
+    // different units (52.mc2.mc.4 vs 53.mc2.mc.5), so the name alone
+    // would collide. The key is unique per (slave, file, id).
+    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s_%.*s",
+                     (int)key.size(), key.data(), (int)cmd->getName().size(),
+                     cmd->getName().data());
     if (n <= 0 || (size_t)n >= sizeof(topic_buf)) return;
-    lowerTopic(topic_buf, n);
+    static constexpr int values_pos = 7;  // strlen("values/")
+    n = values_pos +
+        static_cast<int>(toSnakeCase(topic_buf + values_pos, n - values_pos));
+    topic_buf[n] = '\0';
 
     if (payload_mode_ == MqttPayloadMode::plain) {
       publishStream(topic_buf, 0, false, [&](const ebus::JsonChunkVisitor& v) {
@@ -875,15 +867,55 @@ void Mqtt::handleValueUpdate(std::string_view key) {
     return;
   }
 
-  // One topic per field: values/<field>
+  // One topic per field (or per bit for bits fields): values/<field|bit>
   for (size_t i = 0; i < field_count; ++i) {
+    if (cmd->hasFieldBits(i)) {
+      const size_t bit_count = cmd->getFieldBitCount(i);
+      uint8_t byte = 0;
+      const bool byte_ok = cmd->getFieldByteValue(i, byte);
+      for (size_t b = 0; b < bit_count; ++b) {
+        const std::string_view bit_name = cmd->getFieldBitName(i, b);
+        if (bit_name.empty()) continue;
+        char topic_buf[128];
+        int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s_%.*s",
+                         (int)key.size(), key.data(), (int)bit_name.size(),
+                         bit_name.data());
+        if (n <= 0 || (size_t)n >= sizeof(topic_buf)) continue;
+        static constexpr int values_pos = 7;  // strlen("values/")
+        n = values_pos + static_cast<int>(toSnakeCase(topic_buf + values_pos,
+                                                      n - values_pos));
+        topic_buf[n] = '\0';
+        const uint32_t bit_val = byte_ok ? ((byte >> b) & 1u) : 0;
+        if (payload_mode_ == MqttPayloadMode::plain) {
+          char plain_buf[8];
+          snprintf(plain_buf, sizeof(plain_buf), "%u",
+                   static_cast<unsigned>(bit_val));
+          publishStream(
+              topic_buf, 0, false,
+              [plain_buf](const ebus::JsonChunkVisitor& v) { v(plain_buf); });
+        } else {
+          publishStream(topic_buf, 0, false,
+                        [bit_val](const ebus::JsonChunkVisitor& v) {
+                          ebus::detail::JsonWriter writer(v);
+                          auto scope = writer.objectScope();
+                          writer.writeField("value", bit_val);
+                        });
+        }
+      }
+      continue;
+    }
+
     const char* field_name = cmd->getFieldName(i);
     if (!field_name || !field_name[0]) field_name = "value";
 
     char topic_buf[128];
-    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%s", field_name);
+    int n = snprintf(topic_buf, sizeof(topic_buf), "values/%.*s_%s",
+                     (int)key.size(), key.data(), field_name);
     if (n <= 0 || (size_t)n >= sizeof(topic_buf)) continue;
-    lowerTopic(topic_buf, n);
+    static constexpr int values_pos = 7;  // strlen("values/")
+    n = values_pos +
+        static_cast<int>(toSnakeCase(topic_buf + values_pos, n - values_pos));
+    topic_buf[n] = '\0';
 
     if (payload_mode_ == MqttPayloadMode::plain) {
       publishStream(topic_buf, 0, false,

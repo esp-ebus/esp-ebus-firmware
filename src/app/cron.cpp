@@ -227,7 +227,6 @@ std::string validateRule(const Cron::Rule& rule, CommandManager& commands) {
   if (rule.id.empty()) return "Missing or invalid 'id'";
   if (rule.schedule.empty()) return "Missing or invalid 'schedule'";
   if (rule.command_key.empty()) return "Missing or invalid 'command_key'";
-  if (rule.value_json.empty()) return "Missing field 'value'";
 
   tm sample = {};
   sample.tm_min = 0;
@@ -276,6 +275,10 @@ std::string validateRule(const Cron::Rule& rule, CommandManager& commands) {
     return "Command key '" + rule.command_key + "' not found";
   if (!command->hasWriteCmd())
     return "Command '" + rule.command_key + "' has no write_cmd";
+
+  if (rule.value_json.empty()) {
+    return command->canWriteWithoutValue() ? "" : "Missing field 'value'";
+  }
 
   ebus::ByteView value_bytes = command->getVectorFromValue(rule.value_json);
   if (value_bytes.empty())
@@ -442,11 +445,13 @@ void Cron::fetchRules(const ebus::JsonChunkVisitor& visitor) const {
     writer.writeField("schedule", rule->schedule);
     writer.writeField("command_key", rule->command_key);
     writer.writeField("enabled", rule->enabled);
-    writer.appendKey("value");
-    if (rule->value_json == "null")
-      writer.writeRaw("null");
-    else
-      writer.writeRaw(rule->value_json);
+    if (!rule->value_json.empty()) {
+      writer.appendKey("value");
+      if (rule->value_json == "null")
+        writer.writeRaw("null");
+      else
+        writer.writeRaw(rule->value_json);
+    }
   }
 }
 
@@ -510,8 +515,11 @@ void Cron::tick() {
         continue;
       }
 
-      ebus::Sequence value_bytes = command->getVectorFromValue(rule.value_json);
-      if (value_bytes.empty()) {
+      ebus::Sequence value_bytes;
+      if (!rule.value_json.empty()) {
+        value_bytes = command->getVectorFromValue(rule.value_json);
+      }
+      if (value_bytes.empty() && !command->canWriteWithoutValue()) {
         char warn_buf[160];
         snprintf(warn_buf, sizeof(warn_buf),
                  "Cron skipped, value out of range for rule: %s",
@@ -527,7 +535,10 @@ void Cron::tick() {
         logger.warn("Cron skipped: invalid write command format");
         continue;
       }
-      getEbusController().enqueue(app::priority::send, full_write);
+      if (!command_manager.queueWrite(command->getKey(), full_write)) {
+        logger.warn("Cron skipped: unable to queue write command");
+        continue;
+      }
 
       char info_buf[160];
       snprintf(info_buf, sizeof(info_buf), "Cron write triggered: %s -> %s",
