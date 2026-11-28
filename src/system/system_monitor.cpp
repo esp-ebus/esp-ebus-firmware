@@ -347,6 +347,7 @@ void SystemMonitor::processProtocolInfo() {
     // Formatting happens in processLogRequests; this path stays a memcpy.
     enqueueTelegram(item.info);
 
+    command_manager.handleWriteResult(item.info);
     if (item.info.is_error) {
       Mqtt::publishError(item.info);
     } else {
@@ -401,11 +402,10 @@ void SystemMonitor::logRawTelegram(const ebus::ProtocolInfo& info) {
 
   if (info.is_error) {
     const size_t remaining = static_cast<size_t>(end_buf - p);
-    const int written =
-        std::snprintf(p, remaining, " [error: %s; result=%s; sequence=%s]",
-                      ebus::toString(info.protocol_error),
-                      ebus::toString(info.result),
-                      ebus::toString(info.sequence_state));
+    const int written = std::snprintf(
+        p, remaining, " [error: %s; result=%s; sequence=%s]",
+        ebus::toString(info.protocol_error), ebus::toString(info.result),
+        ebus::toString(info.sequence_state));
     if (written > 0) {
       const size_t available = remaining > 0 ? remaining - 1 : 0;
       p += static_cast<size_t>(written) < available

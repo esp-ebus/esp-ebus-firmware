@@ -48,6 +48,10 @@ curl http://<device-ip>/api/v1/app/logs
 
 ## Force a poll (POST, JSON)
 
+Enqueues an immediate bus read for the key; the fresh value is
+published when the read completes. Errors: `400` (malformed body or
+passive command), `404` unknown key, `503` bus queue full.
+
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
@@ -60,7 +64,9 @@ curl -X POST \
 Scalar `value` for single-field commands, object `value` for
 multi-field ones (all non-`ign` fields required; `ign`/`ign_*` fillers
 auto-pad with 0). Full rules: [`doc/api.md`](api.md). Command schema:
-[`doc/command-schema.md`](command-schema.md).
+[`doc/command-schema.md`](command-schema.md). `503` means the bus queue
+is full — nothing was sent; a newer write for the same key supersedes
+an earlier pending one.
 
 ```bash
 # single-field

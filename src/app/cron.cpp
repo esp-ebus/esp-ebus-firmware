@@ -277,8 +277,7 @@ std::string validateRule(const Cron::Rule& rule, CommandManager& commands) {
     return "Command '" + rule.command_key + "' has no write_cmd";
 
   if (rule.value_json.empty()) {
-    return command->canWriteWithoutValue() ? ""
-                                           : "Missing field 'value'";
+    return command->canWriteWithoutValue() ? "" : "Missing field 'value'";
   }
 
   ebus::ByteView value_bytes = command->getVectorFromValue(rule.value_json);
@@ -536,7 +535,10 @@ void Cron::tick() {
         logger.warn("Cron skipped: invalid write command format");
         continue;
       }
-      getEbusController().enqueue(app::priority::send, full_write);
+      if (!command_manager.queueWrite(command->getKey(), full_write)) {
+        logger.warn("Cron skipped: unable to queue write command");
+        continue;
+      }
 
       char info_buf[160];
       snprintf(info_buf, sizeof(info_buf), "Cron write triggered: %s -> %s",

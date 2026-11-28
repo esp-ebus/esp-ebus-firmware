@@ -10,6 +10,7 @@
 
 #include "app/app_limits.hpp"
 #include "app/command_manager.hpp"
+#include "app/command_read.hpp"
 #include "app/ebus_accessor.hpp"
 #include "app/mqtt_ha.hpp"
 #include "app/mqtt_topic.hpp"
@@ -667,8 +668,13 @@ void Mqtt::handleRead(std::string_view payload) {
 
   Command* command = command_manager.findCommand(key_view);
   if (command != nullptr) {
-    command->setLast(0);  // Trigger immediate physical poll
-    handleValueUpdate(key_view);
+    if (!command->getActive()) {
+      publishResponse("read", "Passive command: waiting for bus traffic");
+    } else if (!requestCommandRead(*command)) {
+      publishResponse("read", "Unable to queue bus read");
+    } else {
+      handleValueUpdate(key_view);
+    }
   } else {  // Use snprintf for error response
     char err_buf[128];
     snprintf(err_buf, sizeof(err_buf), "key '%.*s' not found",
@@ -728,7 +734,10 @@ void Mqtt::handleWrite(std::string_view payload) {
         publishResponse("write", "Invalid write command format");
         return;
       }
-      getEbusController().enqueue(app::priority::send, full_write);
+      if (!command_manager.queueWrite(command->getKey(), full_write)) {
+        publishResponse("write", "Unable to queue write command");
+        return;
+      }
       publishStream("response", 0, false,
                     [command, key_view](const ebus::JsonChunkVisitor& v) {
                       ebus::detail::JsonWriter writer(v);
@@ -742,7 +751,6 @@ void Mqtt::handleWrite(std::string_view payload) {
                                command->getName().data());
                       writer.writeField("status", status_buf);
                     });
-      command->setLast(0);
     } else {
       // Use snprintf for error response
       publishStream("response", 0, false,
@@ -792,8 +800,10 @@ void Mqtt::handleDirectWrite(std::string_view key, std::string_view val_view) {
       logger.warn("Invalid write command format");
       return;
     }
-    getEbusController().enqueue(app::priority::send, full_write);
-    command->setLast(0);
+    if (!command_manager.queueWrite(command->getKey(), full_write)) {
+      logger.warn("[MQTT] Unable to queue write command");
+      return;
+    }
     char buf[128];
     snprintf(buf, sizeof(buf), "[MQTT] Scheduled write for '%.*s'",
              (int)key.size(), key.data());

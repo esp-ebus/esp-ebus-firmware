@@ -23,6 +23,14 @@ carries the complete field set, and the adapter never accumulates
 partial field state across requests (no read-modify-write of guessed
 values).
 
+All writes and manual reads also share one bus queue: a newer write for
+the same key **supersedes** an earlier one still waiting in it (rapid
+updates send only the latest value), a newer manual read supersedes a
+pending one, and a full queue rejects the request before anything is
+sent (HTTP `503`, an error answer on `response` for MQTT `request`, a
+logged skip for cron). After a write completes on the bus the adapter
+re-reads the command, so the published value reflects the bus state.
+
 A write payload's `value` is either:
 
 | Form | Applies to | Encoded as |
@@ -69,8 +77,8 @@ share one envelope:
 ```
 
 On 200 the `status` is a success word (`"successful"`, or a more
-specific one such as `"requested"`); on 4xx it is `"failed"` with a
-human-readable `error`.
+specific one such as `"requested"`); on an error status (4xx/5xx) it is
+`"failed"` with a human-readable `error`.
 
 ### `GET /api/v1/app/values`
 
@@ -94,9 +102,12 @@ field** (per bit for `bits`) so renderers never see nested objects:
 
 ### `POST /api/v1/app/values/read`
 
-Body: `{"key":"01"}`. Resets the command's timer so the value is
-physically re-polled before the next publish — never served from cache
-alone. Errors: `400` malformed body, `404` unknown key.
+Body: `{"key":"01"}`. Enqueues an immediate one-shot bus read — the
+fresh value replaces the cached one when the read completes, and a newer
+read for the same key supersedes one still waiting in the bus queue.
+Errors: `400` malformed body or passive command (`interval = 0`, whose
+read pattern must never be sent), `404` unknown key, `503` bus queue
+full.
 
 ### `POST /api/v1/app/values/write`
 
@@ -117,8 +128,8 @@ curl -X POST -H "Content-Type: application/json" \
 ```
 
 Errors: `400` invalid value / read-only command / malformed body;
-`404` unknown key. Success means *enqueued on the bus*, not *acknowledged
-by the slave*.
+`404` unknown key; `503` bus queue full (nothing was sent). Success
+means *enqueued on the bus*, not *acknowledged by the slave*.
 
 ## MQTT
 
@@ -142,12 +153,17 @@ MAC), configurable (`rootTopic`); a custom root gets a trailing `/`.
 | `<root>request` | `{"id":"read","key":…}` / `{"id":"write","key":…,"value":…}` / `{"id":"restart"}` |
 | `<root>set/#` | suffix after `set/` is the command key; payload is the value |
 
-- `read` resets the command timer (force re-poll, like HTTP read) and
-  re-publishes the value; unknown key answers on `response`.
+- `read` enqueues an immediate bus read (like HTTP read; a newer read
+  supersedes a pending one), re-publishes the current value right away,
+  and the fresh value follows on `values/…` once the read completes.
+  Passive commands, a full bus queue, and unknown keys answer on
+  `response` with the error text in `status`.
 - `write` accepts `value` in **either write-contract form** (scalar or
   object) and answers on `response` — JSON objects are accepted here
   regardless of the configured payload mode. For a fieldless simple
-  write command, omit `value`.
+  write command, omit `value`. A full bus queue answers on `response`
+  too (`status` carries `Unable to queue write command`); nothing is
+  sent.
 - `set/<key>` is the direct-write form (also what Home Assistant uses):
   payload is a scalar for single-field commands or a JSON object for
   multi-field ones. An empty payload triggers a fieldless simple write.
@@ -182,7 +198,8 @@ polling, which only reads).
   same write contract applies. Omit it for fieldless simple write commands.
 - Validated at save (unknown command, read-only command, bad value →
   rejected) and again at fire time (rule skipped with a warning if the
-  command disappeared or the value went out of range).
+  command disappeared, the value went out of range, or the bus queue
+  rejects the write).
 - At most one fire per minute per rule.
 
 ## Home Assistant discovery

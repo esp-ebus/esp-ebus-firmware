@@ -13,6 +13,7 @@
 
 #include "app/command.hpp"
 #include "app/command_manager.hpp"
+#include "app/ebus_test_helpers.hpp"
 
 using namespace ebus::detail;
 using namespace ebus;
@@ -719,4 +720,181 @@ TEST_CASE("CommandManager saveCommands round-trips bits maps",
   REQUIRE(reloaded->getFieldBitName(0, 1) == "bi_1");
 
   command_manager.wipeCommands();
+}
+
+namespace {
+
+struct WriteReadbackFixture {
+  const ebus::Sequence message{0x50, 0xb5, 0x09, 0x04, 0x0e, 0x33, 0x00, 0x14};
+  std::vector<uint32_t> queued;  // Sessions this fixture put on the queue
+
+  WriteReadbackFixture() {
+    command_manager.wipeCommands();
+    REQUIRE(configureHostEbusController());
+    insertCommand();
+  }
+
+  ~WriteReadbackFixture() {
+    // Host tests never drain the bus queue: cancel every session this fixture
+    // queued so the next test starts with an empty queue.
+    for (const uint32_t id : queued) getEbusController().cancel(id);
+    if (Command* cmd = command_manager.findCommand("setpoint")) {
+      getEbusController().cancel(cmd->getPendingReadId());
+    }
+    command_manager.wipeCommands();
+  }
+
+  void insertCommand(bool active = true,
+                     const char* read_cmd = "50b509030d3300") {
+    const std::string json =
+        std::string(R"({"key":"setpoint","name":"Setpoint","read_cmd":")") +
+        read_cmd + R"(","write_cmd":"50b509040e3300","interval":)" +
+        (active ? "60" : "0") +
+        R"(,"master":false,"fields":[{"name":"value","profile":"uint8","position":1}]})";
+    JsonReader reader(json);
+    command_manager.insertCommand(Command::fromJson(reader));
+  }
+
+  Command* command() { return command_manager.findCommand("setpoint"); }
+
+  ebus::ProtocolInfo queueWrite() {
+    REQUIRE(command_manager.queueWrite("setpoint", message));
+    ebus::ProtocolInfo result{};
+    result.session_id = command()->getWriteSessionId();
+    queued.push_back(result.session_id);
+    REQUIRE(result.session_id != 0);
+    REQUIRE(command()->getPendingReadId() == 0);
+    return result;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("Readback waits for a successful write and is requested once",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  auto result = fixture.queueWrite();
+
+  SECTION("Unrelated results do not start readback") {
+    auto unrelated = result;
+    unrelated.session_id += 1000;
+    command_manager.handleWriteResult(unrelated);
+    REQUIRE(fixture.command()->getWriteSessionId() == result.session_id);
+    REQUIRE(fixture.command()->getPendingReadId() == 0);
+  }
+  SECTION("An unsuccessful attempt can still be retried by the library") {
+    result.is_error = true;
+    command_manager.handleWriteResult(result);
+    REQUIRE(fixture.command()->getWriteSessionId() == result.session_id);
+    REQUIRE(fixture.command()->getPendingReadId() == 0);
+    result.is_error = false;
+  }
+
+  command_manager.handleWriteResult(result);
+  REQUIRE(fixture.command()->getWriteSessionId() == 0);
+  const auto read_id = fixture.command()->getPendingReadId();
+  REQUIRE(read_id != 0);
+  REQUIRE(read_id != result.session_id);
+
+  command_manager.handleWriteResult(result);
+  REQUIRE(fixture.command()->getPendingReadId() == read_id);
+}
+
+TEST_CASE("Only the latest accepted write starts readback",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  const auto previous = fixture.queueWrite();
+  const auto current = fixture.queueWrite();
+  REQUIRE(current.session_id != previous.session_id);
+
+  command_manager.handleWriteResult(previous);
+  REQUIRE(fixture.command()->getWriteSessionId() == current.session_id);
+  REQUIRE(fixture.command()->getPendingReadId() == 0);
+
+  command_manager.handleWriteResult(current);
+  REQUIRE(fixture.command()->getPendingReadId() != 0);
+}
+
+TEST_CASE("A full queue still accepts a superseding write",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  const auto previous = fixture.queueWrite();
+
+  {
+    QueueGuard queue;
+    REQUIRE(queue.fill());
+
+    // The replacement frees the previous write's slot, so it is accepted
+    // even though the queue is full.
+    REQUIRE(command_manager.queueWrite("setpoint", fixture.message));
+    const auto current = fixture.command()->getWriteSessionId();
+    REQUIRE(current != 0);
+    REQUIRE(current != previous.session_id);
+    queue.track(current);
+
+    command_manager.handleWriteResult(previous);
+    REQUIRE(fixture.command()->getWriteSessionId() == current);
+    REQUIRE(fixture.command()->getPendingReadId() == 0);
+  }
+
+  // Queue drained: the superseding write's result requests the readback.
+  ebus::ProtocolInfo write_result{};
+  write_result.session_id = fixture.command()->getWriteSessionId();
+  command_manager.handleWriteResult(write_result);
+  REQUIRE(fixture.command()->getWriteSessionId() == 0);
+  REQUIRE(fixture.command()->getPendingReadId() != 0);
+}
+
+TEST_CASE("A rejected write preserves the previous write session",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  const auto accepted = fixture.queueWrite();
+  // The accepted session is no longer replaceable: it has already been
+  // handed to the bus (an in-flight session is not part of the queue).
+  REQUIRE(getEbusController().cancel(accepted.session_id));
+
+  QueueGuard queue;
+  REQUIRE(queue.fill());
+  REQUIRE_FALSE(command_manager.queueWrite("setpoint", fixture.message));
+  REQUIRE(fixture.command()->getWriteSessionId() == accepted.session_id);
+  REQUIRE(fixture.command()->getPendingReadId() == 0);
+}
+
+TEST_CASE("A full readback queue does not leave a pending read",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  const auto result = fixture.queueWrite();
+  QueueGuard queue;
+  REQUIRE(queue.fill());
+
+  command_manager.handleWriteResult(result);
+  REQUIRE(fixture.command()->getWriteSessionId() == 0);
+  REQUIRE(fixture.command()->getPendingReadId() == 0);
+}
+
+TEST_CASE("Write completion does not transmit passive or empty read commands",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  SECTION("Passive match pattern") { fixture.insertCommand(false, "51501407"); }
+  SECTION("No read command") { fixture.insertCommand(true, ""); }
+  const auto result = fixture.queueWrite();
+
+  command_manager.handleWriteResult(result);
+  REQUIRE(fixture.command()->getWriteSessionId() == 0);
+  REQUIRE(fixture.command()->getPendingReadId() == 0);
+}
+
+TEST_CASE("Old write results do not affect removed or redefined commands",
+          "[CommandManager][write_readback]") {
+  WriteReadbackFixture fixture;
+  const auto result = fixture.queueWrite();
+  SECTION("Command removed and reinserted") {
+    command_manager.removeCommand("setpoint");
+    fixture.insertCommand();
+  }
+  SECTION("Command replaced") { fixture.insertCommand(); }
+
+  command_manager.handleWriteResult(result);
+  REQUIRE(fixture.command()->getWriteSessionId() == 0);
+  REQUIRE(fixture.command()->getPendingReadId() == 0);
 }
